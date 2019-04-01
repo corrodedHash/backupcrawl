@@ -5,6 +5,17 @@ import os
 import subprocess
 
 
+def is_vc_protected(path: str) -> bool:
+    """Returns whether a file or a directory is version controlled by git"""
+    if os.path.isfile(path):
+        path = os.path.dirname(os.path.realpath(path))
+    git_status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=path, stdout=subprocess.PIPE)
+    if git_status.returncode == 0:
+        return True
+    return False
+
+
 def is_vc_root(path: str) -> bool:
     """Checks if given path is the root of a git repo"""
     return os.path.isdir(os.path.join(path, '.git'))
@@ -32,6 +43,7 @@ def git_pushed(path: str) -> bool:
 class BackupDir():
     """An entry for the backup scan"""
     path: str
+    symlink: bool = False
     is_git_repo: bool = False
     repo_clean: bool = False
     repo_pushed: bool = False
@@ -47,15 +59,21 @@ def breadth_first_file_scan(root: str) -> Iterator[BackupDir]:
         for parent in dirs:
             for current_file in os.listdir(parent):
                 current_file_path = os.path.join(parent, current_file)
+                if os.path.islink(current_file_path):
+                    files.append(BackupDir(current_file_path, symlink=True))
+                    continue
+
                 if not os.path.isdir(current_file_path):
                     files.append(BackupDir(current_file_path))
                     continue
+
                 if is_vc_root(current_file_path):
                     files.append(BackupDir(
                         current_file_path, is_git_repo=True,
                         repo_clean=git_clean(current_file_path)))
                     got_vc = True
                     continue
+
                 next_dirs.append(current_file_path)
 
         if got_vc:
@@ -75,8 +93,11 @@ def walkbf(path: str) -> None:
     """Main function"""
     clean_repos: List[str] = []
     dirty_repos: List[str] = []
+    symlinks: List[str] = []
     for current_file in breadth_first_file_scan(path):
-        if current_file.is_git_repo:
+        if current_file.symlink:
+            symlinks.append(current_file.path)
+        elif current_file.is_git_repo:
             if current_file.repo_clean:
                 clean_repos.append(current_file.path)
             else:
@@ -89,6 +110,9 @@ def walkbf(path: str) -> None:
     print("Clean repositories")
     for repo in clean_repos:
         print(repo)
+    print("Symlinks")
+    for repo in symlinks:
+        print(repo)
 
 
-walkbf('/home/lukas/documents/')
+walkbf('/home/lukas/')
