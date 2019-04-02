@@ -21,7 +21,7 @@ def is_vc_root(path: str) -> bool:
     return os.path.isdir(os.path.join(path, '.git'))
 
 
-def git_clean(path: str) -> bool:
+def git_is_clean(path: str) -> bool:
     """Checks if a git repository is clean"""
     git_status = subprocess.run(
         ["git", "status", "--porcelain"], cwd=path, stdout=subprocess.PIPE)
@@ -70,7 +70,7 @@ def breadth_first_file_scan(root: str) -> Iterator[BackupDir]:
                 if is_vc_root(current_file_path):
                     files.append(BackupDir(
                         current_file_path, is_git_repo=True,
-                        repo_clean=git_clean(current_file_path)))
+                        repo_clean=git_is_clean(current_file_path)))
                     got_vc = True
                     continue
 
