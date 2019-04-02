@@ -36,7 +36,15 @@ def git_is_clean(path: str) -> bool:
 
 def git_pushed(path: str) -> bool:
     """Checks if a git repository has all local branches pushed"""
-    return not path
+
+    git_for_each = subprocess.run(
+        ["git", "for-each-ref", "--format='%(upstream:trackshort)'", "refs/heads"],
+        cwd=path, stdout=subprocess.PIPE)
+
+    if git_for_each.returncode != 0:
+        raise RuntimeError
+
+    return all(x in (b"'<'", b"'='") for x in git_for_each.stdout.splitlines())
 
 
 @dataclass
@@ -70,7 +78,7 @@ def breadth_first_file_scan(root: str) -> Iterator[BackupDir]:
                 if is_vc_root(current_file_path):
                     files.append(BackupDir(
                         current_file_path, is_git_repo=True,
-                        repo_clean=git_is_clean(current_file_path)))
+                        repo_clean=git_is_clean(current_file_path), repo_pushed=git_pushed(current_file_path)))
                     got_vc = True
                     continue
 
@@ -93,6 +101,7 @@ def walkbf(path: str) -> None:
     """Main function"""
     clean_repos: List[str] = []
     dirty_repos: List[str] = []
+    unsynced_repos: List[str] = []
     symlinks: List[str] = []
     for current_file in breadth_first_file_scan(path):
         if current_file.symlink:
@@ -100,19 +109,24 @@ def walkbf(path: str) -> None:
         elif current_file.is_git_repo:
             if current_file.repo_clean:
                 clean_repos.append(current_file.path)
+            elif not current_file.repo_pushed:
+                unsynced_repos.append(current_file.path)
             else:
                 dirty_repos.append(current_file.path)
         else:
-            print(current_file.path)
+            print("\t" + current_file.path)
     print("Dirty repositories")
     for repo in dirty_repos:
-        print(repo)
+        print("\t" + repo)
+    print("Unsynced repositories")
+    for repo in unsynced_repos:
+        print("\t" + repo)
     print("Clean repositories")
     for repo in clean_repos:
-        print(repo)
+        print("\t" + repo)
     print("Symlinks")
     for repo in symlinks:
-        print(repo)
+        print("\t" + repo)
 
 
 walkbf('/home/lukas/')
