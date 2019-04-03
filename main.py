@@ -103,9 +103,9 @@ def walkbf(path: str) -> None:
         print("\t" + current_file)
 
     for enum_state, status_string in (
-            (GitSyncStatus.CLEAN_SYNCED, "Clean repositories"),
             (GitSyncStatus.DIRTY, "Dirty repositories"),
-            (GitSyncStatus.AHEAD, "Unsynced repositories")):
+            (GitSyncStatus.AHEAD, "Unsynced repositories"),
+            (GitSyncStatus.CLEAN_SYNCED, "Clean repositories")):
         print(status_string + ":")
         for current_file in [t.path for t in sync_tree[2] if t.git_status == enum_state]:
             print("\t" + current_file)
