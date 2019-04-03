@@ -1,5 +1,5 @@
 """Main file"""
-from typing import Iterator, List, Tuple
+from typing import List, Tuple
 from dataclasses import dataclass
 import os
 import subprocess
@@ -54,6 +54,7 @@ class GitRepo():
 
 
 class FileScanResult(enum.Enum):
+    """Whether or not a subtree contains a versioncontrolled directory"""
     NO_VC = enum.auto()
     VC = enum.auto()
 
@@ -66,8 +67,6 @@ def depth_first_file_scan(root: str) -> Tuple[FileScanResult, List[str], List[Gi
 
     for current_file in os.listdir(root):
         current_file_path = os.path.join(root, current_file)
-        if os.path.islink(current_file_path):
-            continue
 
         if not os.path.isdir(current_file_path):
             if not os.path.isfile(current_file_path):
@@ -75,6 +74,9 @@ def depth_first_file_scan(root: str) -> Tuple[FileScanResult, List[str], List[Gi
                 # it is some symlink, socket or pipe. We don't care
                 continue
             result.append(current_file_path)
+            continue
+
+        if os.path.islink(current_file_path):
             continue
 
         git_status = git_check(current_file_path)
@@ -100,10 +102,10 @@ def walkbf(path: str) -> None:
     for current_file in sync_tree[1]:
         print("\t" + current_file)
 
-    for enum_state, status_string in ((GitSyncStatus.CLEAN_SYNCED, "Clean repositories"),
-                                      (GitSyncStatus.DIRTY,
-                                       "Dirty repositories"),
-                                      (GitSyncStatus.AHEAD, "Unsynced repositories")):
+    for enum_state, status_string in (
+            (GitSyncStatus.CLEAN_SYNCED, "Clean repositories"),
+            (GitSyncStatus.DIRTY, "Dirty repositories"),
+            (GitSyncStatus.AHEAD, "Unsynced repositories")):
         print(status_string + ":")
         for current_file in [t.path for t in sync_tree[2] if t.git_status == enum_state]:
             print("\t" + current_file)
