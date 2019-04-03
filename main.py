@@ -31,7 +31,8 @@ def git_check_ahead(path: str) -> bool:
 def git_check(path: str) -> GitSyncStatus:
     """Checks if a git repository is clean"""
     git_status = subprocess.run(
-        ["git", "status", "--porcelain"], cwd=path, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        ["git", "status", "--porcelain"], cwd=path,
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
     if git_status.returncode != 0:
         return GitSyncStatus.NOGIT
