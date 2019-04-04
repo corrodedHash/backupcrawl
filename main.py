@@ -68,15 +68,15 @@ def depth_first_file_scan(root: str) -> Tuple[FileScanResult, List[str], List[Gi
     for current_file in os.listdir(root):
         current_file_path = os.path.join(root, current_file)
 
+        if os.path.islink(current_file_path):
+            continue
+
         if not os.path.isdir(current_file_path):
             if not os.path.isfile(current_file_path):
                 # If path is not a directory, or a file,
                 # it is some symlink, socket or pipe. We don't care
                 continue
             result.append(current_file_path)
-            continue
-
-        if os.path.islink(current_file_path):
             continue
 
         git_status = git_check(current_file_path)
