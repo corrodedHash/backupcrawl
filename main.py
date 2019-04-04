@@ -2,48 +2,9 @@
 from typing import List, Tuple
 from dataclasses import dataclass
 import os
-import subprocess
 import enum
-
-
-class GitSyncStatus(enum.Enum):
-    """Different backup states a git repository can be in"""
-    NOGIT = enum.auto()
-    CLEAN_SYNCED = enum.auto()
-    DIRTY = enum.auto()
-    AHEAD = enum.auto()
-
-
-def git_check_ahead(path: str) -> bool:
-    """Checks if a git repository got a branch that is ahead of the remote branch"""
-
-    git_for_each = subprocess.run(
-        ["git", "for-each-ref",
-         "--format='%(upstream:trackshort)'", "refs/heads"],
-        cwd=path, stdout=subprocess.PIPE)
-
-    if git_for_each.returncode != 0:
-        raise RuntimeError
-
-    return any(x in (b"'>'", b"'<>'", b"''") for x in git_for_each.stdout.splitlines())
-
-
-def git_check(path: str) -> GitSyncStatus:
-    """Checks if a git repository is clean"""
-    git_status = subprocess.run(
-        ["git", "status", "--porcelain"], cwd=path,
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-
-    if git_status.returncode != 0:
-        return GitSyncStatus.NOGIT
-
-    if git_status.stdout != b"":
-        return GitSyncStatus.DIRTY
-
-    if git_check_ahead(path):
-        return GitSyncStatus.AHEAD
-
-    return GitSyncStatus.CLEAN_SYNCED
+from git_check import GitSyncStatus, git_check
+from pacman_check import PacmanSyncStatus, pacman_check
 
 
 @dataclass
@@ -51,6 +12,7 @@ class GitRepo():
     """An entry for the backup scan"""
     path: str
     git_status: GitSyncStatus = GitSyncStatus.NOGIT
+    pacman_status: PacmanSyncStatus = PacmanSyncStatus.NOPAC
 
 
 class FileScanResult(enum.Enum):
@@ -76,7 +38,12 @@ def depth_first_file_scan(root: str) -> Tuple[FileScanResult, List[str], List[Gi
                 # If path is not a directory, or a file,
                 # it is some symlink, socket or pipe. We don't care
                 continue
-            result.append(current_file_path)
+            pacman_status = pacman_check(current_file_path)
+            if pacman_status == PacmanSyncStatus.NOPAC:
+                result.append(current_file_path)
+                continue
+
+            repo_info.append(GitRepo(current_file_path, pacman_status=pacman_status))
             continue
 
         git_status = git_check(current_file_path)
