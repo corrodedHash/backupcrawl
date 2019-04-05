@@ -21,14 +21,28 @@ class FileScanResult(enum.Enum):
     VC = enum.auto()
 
 
-def depth_first_file_scan(root: str) -> Tuple[FileScanResult, List[str], List[GitRepo]]:
+def skip_path(path: str) -> bool:
+    """Checks if user chose to ignore given path"""
+    if path == "hihi":
+        return True
+    return False
+
+
+def depth_first_file_scan(root: str) -> Tuple[bool, List[str], List[GitRepo]]:
     """Iterates depth first looking for git repositories"""
     result: List[str] = []
     repo_info: List[GitRepo] = []
-    got_repo: FileScanResult = FileScanResult.NO_VC
+    split_tree: bool = False
 
     for current_file in os.listdir(root):
         current_file_path = os.path.join(root, current_file)
+
+        if not os.access(current_file_path, os.R_OK):
+            print("No permission for " + current_file_path)
+            continue
+
+        if skip_path(current_file_path):
+            continue
 
         if os.path.islink(current_file_path):
             continue
@@ -36,31 +50,33 @@ def depth_first_file_scan(root: str) -> Tuple[FileScanResult, List[str], List[Gi
         if not os.path.isdir(current_file_path):
             if not os.path.isfile(current_file_path):
                 # If path is not a directory, or a file,
-                # it is some symlink, socket or pipe. We don't care
+                # it is some socket or pipe. We don't care
                 continue
             pacman_status = pacman_check(current_file_path)
             if pacman_status == PacmanSyncStatus.NOPAC:
                 result.append(current_file_path)
                 continue
 
-            repo_info.append(GitRepo(current_file_path, pacman_status=pacman_status))
+            repo_info.append(
+                GitRepo(current_file_path, pacman_status=pacman_status))
+            split_tree = True
             continue
 
         git_status = git_check(current_file_path)
         if git_status != GitSyncStatus.NOGIT:
             repo_info.append(GitRepo(current_file_path, git_status))
-            got_repo = FileScanResult.VC
+            split_tree = True
             continue
 
         current_result = depth_first_file_scan(current_file_path)
         repo_info.extend(current_result[2])
-        if current_result[0] == FileScanResult.VC:
+        if current_result[0]:
             result.extend(current_result[1])
-            got_repo = FileScanResult.VC
+            split_tree = True
         elif current_result[1]:
             result.append(current_file_path)
 
-    return (got_repo, result, repo_info)
+    return (split_tree, result, repo_info)
 
 
 def walkbf(path: str) -> None:
@@ -77,5 +93,12 @@ def walkbf(path: str) -> None:
         for current_file in [t.path for t in sync_tree[2] if t.git_status == enum_state]:
             print("\t" + current_file)
 
+    for pacman_status, status_string in (
+            (PacmanSyncStatus.CHANGED, "Changed pacman file"),
+            (PacmanSyncStatus.CLEAN, "Clean pacman file")):
+        print(status_string + ":")
+        for current_file in [t.path for t in sync_tree[2] if t.pacman_status == pacman_status]:
+            print("\t" + current_file)
 
-walkbf('/home/lukas')
+
+walkbf('/etc')
