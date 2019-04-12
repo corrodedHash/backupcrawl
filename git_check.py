@@ -22,7 +22,8 @@ def _git_check_ahead(path: str) -> bool:
     if git_for_each.returncode != 0:
         raise RuntimeError
 
-    return any(x in (b"'>'", b"'<>'", b"''") for x in git_for_each.stdout.splitlines())
+    return any(x in (b"'>'", b"'<>'", b"''")
+               for x in git_for_each.stdout.splitlines())
 
 
 def git_check(path: str) -> GitSyncStatus:
