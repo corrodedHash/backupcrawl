@@ -1,7 +1,6 @@
 """Contains BackupCrawler class"""
 
 import logging
-import dataclasses
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
 from pathlib import Path
@@ -14,19 +13,15 @@ MODULE_LOGGER = logging.getLogger("backupcrawler")
 
 
 @dataclass
-class _ScanConfig:
-    check_pacman: bool = False
-    ignore_paths: List[Path] = dataclasses.field(default_factory=list)
-
-
-@dataclass
 class GitRepo():
     """An entry for the backup scan"""
     path: Path
     git_status: GitSyncStatus = GitSyncStatus.NOGIT
 
+
 @dataclass
 class PacmanFile():
+    """An entry for a file managed by pacman"""
     path: Path
 
 
@@ -37,7 +32,7 @@ class FileScanResult(enum.Enum):
 
 
 async def _git_crawl(root: Path,
-                     config: _ScanConfig) \
+                     ignore_paths: List[Path]) \
         -> Tuple[bool, List[Path], List[GitRepo], List[PacmanFile]]:
     """Iterates depth first looking for git repositories"""
     MODULE_LOGGER.debug("Entering %s", root)
@@ -48,7 +43,7 @@ async def _git_crawl(root: Path,
 
     for current_file in root.iterdir():
 
-        if current_file in config.ignore_paths:
+        if current_file in ignore_paths:
             split_tree = True
             continue
 
@@ -81,7 +76,7 @@ async def _git_crawl(root: Path,
             split_tree = True
             continue
 
-        current_result = await _git_crawl(current_file, config)
+        current_result = await _git_crawl(current_file, ignore_paths)
         repo_info.extend(current_result[2])
         pacman_files.extend(current_result[3])
         if current_result[0]:
@@ -93,32 +88,14 @@ async def _git_crawl(root: Path,
     return (split_tree, result, repo_info, pacman_files)
 
 
-def _gather_files(roots: List[Path]) -> List[str]:
-    files: List[str] = []
-    while roots:
-        if roots[0].is_dir():
-            for current_path in roots[0].iterdir():
-                if current_path.is_file():
-                    files.append(str(current_path))
-                if current_path.is_dir():
-                    roots.append(current_path)
-        roots = roots[1:]
-    return files
-
-
 def scan(root: Path,
-         check_pacman: bool = False,
-         ignore_paths: Optional[List[Path]] = None) -> Tuple[List[Path],
-                                                             List[GitRepo], List[PacmanFile]]:
+         ignore_paths: Optional[List[Path]] = None) \
+        -> Tuple[List[Path], List[GitRepo], List[PacmanFile]]:
     """Scan the given path for files that are not backed up"""
     if not ignore_paths:
         ignore_paths = []
 
     _, paths, repos, pacman_files = asyncio.run(
-        _git_crawl(
-            root,
-            _ScanConfig(
-                check_pacman=check_pacman,
-                ignore_paths=ignore_paths)))
+        _git_crawl(root, ignore_paths=ignore_paths))
 
     return (paths, repos, pacman_files)

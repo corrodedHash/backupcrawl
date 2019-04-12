@@ -15,7 +15,7 @@ def walkbf(path: str) -> None:
                                    "/home/lukas/.vscode",
                                    "/home/lukas/.vim/bundle", ]))
     sync_tree, git_repos, _ = backupcrawler.scan(
-        Path(path), ignore_paths=ignore_paths, check_pacman=False)
+        Path(path), ignore_paths=ignore_paths)
     for current_file in sync_tree:
         print("\t" + str(current_file))
 
@@ -30,6 +30,6 @@ def walkbf(path: str) -> None:
 
 
 logging.basicConfig(level="DEBUG")
-# walkbf('/home/lukas')
-walkbf('/etc')
+walkbf('/home/lukas')
+# walkbf('/etc')
 # walkbf('/home/lukas/Downloads')

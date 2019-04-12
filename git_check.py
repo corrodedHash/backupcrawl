@@ -2,6 +2,8 @@
 import subprocess
 import enum
 from pathlib import Path
+import logging
+MODULE_LOGGER = logging.getLogger('backupcrawl.git_check')
 
 
 class GitSyncStatus(enum.Enum):
@@ -36,6 +38,8 @@ def git_check_root(path: Path) -> GitSyncStatus:
     git_status = subprocess.run(
         ["git", "status", "--porcelain"], cwd=path,
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+    MODULE_LOGGER.debug("Calling git shell command at %s", str(path))
 
     assert git_status.returncode == 0
 
