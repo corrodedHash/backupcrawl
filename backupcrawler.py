@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import List, Tuple, Optional
 from pathlib import Path
 import enum
-import os
 import asyncio
 from git_check import GitSyncStatus, git_check_root
 from pacman_check import PacmanSyncStatus, pacman_check
@@ -15,7 +14,7 @@ from pacman_check import PacmanSyncStatus, pacman_check
 @dataclass
 class _ScanConfig:
     check_pacman: bool = False
-    ignore_paths: List[str] = dataclasses.field(default_factory=list)
+    ignore_paths: List[Path] = dataclasses.field(default_factory=list)
 
 
 @dataclass
@@ -93,8 +92,8 @@ async def _scan(root: Path,
 def scan(root: Path,
          check_pacman: bool = False,
          ignore_paths: Optional[List[Path]] = None) -> Tuple[bool,
-                                                            List[Path],
-                                                            List[GitRepo]]:
+                                                             List[Path],
+                                                             List[GitRepo]]:
     """Scan the given path for files that are not backed up"""
     if not ignore_paths:
         ignore_paths = []
