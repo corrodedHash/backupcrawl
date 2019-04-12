@@ -14,7 +14,7 @@ def walkbf(path: str) -> None:
                                    "/home/lukas/.debug",
                                    "/home/lukas/.vscode",
                                    "/home/lukas/.vim/bundle", ]))
-    sync_tree, git_repos, _ = backupcrawler.scan(
+    sync_tree, git_repos, pacman_files = backupcrawler.scan(
         Path(path), ignore_paths=ignore_paths)
     for current_file in sync_tree:
         print("\t" + str(current_file))
@@ -27,6 +27,10 @@ def walkbf(path: str) -> None:
         for current_file in [t.path for t in git_repos
                              if t.git_status == enum_state]:
             print("\t" + str(current_file))
+
+    print("Managed by pacman:")
+    for current_pacfile in pacman_files:
+        print('\t' + str(current_pacfile.path))
 
 
 # logging.basicConfig(level="DEBUG")
