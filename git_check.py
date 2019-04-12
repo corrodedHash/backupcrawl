@@ -1,6 +1,7 @@
 """Git check"""
 import subprocess
 import enum
+from pathlib import Path
 
 
 class GitSyncStatus(enum.Enum):
@@ -11,8 +12,9 @@ class GitSyncStatus(enum.Enum):
     AHEAD = enum.auto()
 
 
-def _git_check_ahead(path: str) -> bool:
-    """Checks if a git repository got a branch that is ahead of the remote branch"""
+def _git_check_ahead(path: Path) -> bool:
+    """Checks if a git repository got a branch that
+    is ahead of the remote branch"""
 
     git_for_each = subprocess.run(
         ["git", "for-each-ref",
@@ -26,14 +28,16 @@ def _git_check_ahead(path: str) -> bool:
                for x in git_for_each.stdout.splitlines())
 
 
-def git_check(path: str) -> GitSyncStatus:
+def git_check_root(path: Path) -> GitSyncStatus:
     """Checks if a git repository is clean"""
+    if not (path / '.git').is_dir():
+        return GitSyncStatus.NOGIT
+
     git_status = subprocess.run(
         ["git", "status", "--porcelain"], cwd=path,
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
-    if git_status.returncode != 0:
-        return GitSyncStatus.NOGIT
+    assert git_status.returncode == 0
 
     if git_status.stdout != b"":
         return GitSyncStatus.DIRTY
