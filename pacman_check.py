@@ -1,6 +1,8 @@
 """Pacman check"""
 import subprocess
 import enum
+from typing import List, Tuple, Optional, Dict
+from pathlib import Path
 
 
 class PacmanSyncStatus(enum.Enum):
@@ -8,6 +10,29 @@ class PacmanSyncStatus(enum.Enum):
     NOPAC = enum.auto()
     CHANGED = enum.auto()
     CLEAN = enum.auto()
+
+
+FILE_DICT: Optional[Dict[str, str]] = None
+
+
+def _initialize_dict() -> None:
+    pacman_output = subprocess.run(
+        ["pacman", "-Ql"], stdout=subprocess.PIPE)
+    global FILE_DICT
+    FILE_DICT = {
+        path: package for package, path in (
+            l.split(maxsplit=1) for l in (
+                l for l in pacman_output.stdout.decode('utf-8').splitlines()))}
+
+
+def check_file(filename: Path) -> Optional[str]:
+    """Checks if a single file is managed by pacman, returns the package"""
+    if not FILE_DICT:
+        _initialize_dict()
+    try:
+        return FILE_DICT[str(filename)]
+    except KeyError:
+        return None
 
 
 def pacman_check(path: str) -> PacmanSyncStatus:
