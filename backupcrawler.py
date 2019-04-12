@@ -1,28 +1,14 @@
 """Contains BackupCrawler class"""
 
 import logging
-from dataclasses import dataclass
 from typing import List, Tuple, Optional
 from pathlib import Path
 import enum
 import asyncio
-from git_check import GitSyncStatus, git_check_root
-import pacman_check
+from git_check import GitSyncStatus, git_check_root, GitRepo
+from pacman_check import PacmanSyncStatus, PacmanFile, is_pacman_file
 
 MODULE_LOGGER = logging.getLogger("backupcrawler")
-
-
-@dataclass
-class GitRepo():
-    """An entry for the backup scan"""
-    path: Path
-    git_status: GitSyncStatus = GitSyncStatus.NOGIT
-
-
-@dataclass
-class PacmanFile():
-    """An entry for a file managed by pacman"""
-    path: Path
 
 
 class FileScanResult(enum.Enum):
@@ -51,12 +37,12 @@ async def _git_crawl(root: Path,
             continue
 
         if current_file.is_file():
-            pac_result = pacman_check.check_file(current_file)
-            if pac_result:
-                pacman_files.append(PacmanFile(path=current_file))
-                split_tree = True
-            else:
+            pac_result = is_pacman_file(current_file)
+            if pac_result.status == PacmanSyncStatus.NOPAC:
                 result.append(current_file)
+                continue
+            pacman_files.append(pac_result)
+            split_tree = True
             continue
 
         if not current_file.is_dir():
@@ -71,8 +57,8 @@ async def _git_crawl(root: Path,
             continue
 
         git_status = git_check_root(current_file)
-        if git_status != GitSyncStatus.NOGIT:
-            repo_info.append(GitRepo(current_file, git_status))
+        if git_status.status != GitSyncStatus.NOGIT:
+            repo_info.append(git_status)
             split_tree = True
             continue
 

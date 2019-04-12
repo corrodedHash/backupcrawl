@@ -2,7 +2,7 @@
 import logging
 from pathlib import Path
 import backupcrawler
-from backupcrawler import GitSyncStatus
+from backupcrawler import GitSyncStatus, PacmanSyncStatus
 
 
 def walkbf(path: str) -> None:
@@ -25,15 +25,20 @@ def walkbf(path: str) -> None:
             (GitSyncStatus.CLEAN_SYNCED, "Clean repositories")):
         print(status_string + ":")
         for current_file in [t.path for t in git_repos
-                             if t.git_status == enum_state]:
+                             if t.status == enum_state]:
             print("\t" + str(current_file))
 
     print("Managed by pacman:")
-    for current_pacfile in pacman_files:
-        print('\t' + str(current_pacfile.path))
+    for pacman_status, status_string in (
+            (PacmanSyncStatus.CHANGED, "Changed pacman files"),
+            (PacmanSyncStatus.CLEAN, "Clean pacman files")):
+        print(status_string + ":")
+        for current_file in [t for t in pacman_files
+                             if t.status == pacman_status]:
+            print("\t" + str(current_file.path) + " " + current_file.package)
 
 
-# logging.basicConfig(level="DEBUG")
+logging.basicConfig(level="DEBUG")
 # walkbf('/home/lukas')
 walkbf('/etc')
 # walkbf('/home/lukas/Downloads')
