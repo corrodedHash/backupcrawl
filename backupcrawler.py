@@ -67,7 +67,7 @@ async def _git_crawl(root: Path,
         try:
             (current_file / 'hehehehe').exists()
         except PermissionError:
-            print("No permissions for {str(current_file)}")
+            print(f"No permissions for {str(current_file)}")
             continue
 
         git_status = git_check_root(current_file)

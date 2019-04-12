@@ -29,7 +29,7 @@ def walkbf(path: str) -> None:
             print("\t" + str(current_file))
 
 
-logging.basicConfig(level="DEBUG")
-walkbf('/home/lukas')
-# walkbf('/etc')
+# logging.basicConfig(level="DEBUG")
+# walkbf('/home/lukas')
+walkbf('/etc')
 # walkbf('/home/lukas/Downloads')
