@@ -2,7 +2,7 @@
 import logging
 from pathlib import Path
 import backupcrawler
-from backupcrawler import GitSyncStatus, PacmanSyncStatus
+from backupcrawler import GitSyncStatus
 
 
 def walkbf(path: str) -> None:
@@ -14,9 +14,9 @@ def walkbf(path: str) -> None:
                                    "/home/lukas/.debug",
                                    "/home/lukas/.vscode",
                                    "/home/lukas/.vim/bundle", ]))
-    sync_tree = backupcrawler.scan(
+    sync_tree, git_repos, _ = backupcrawler.scan(
         Path(path), ignore_paths=ignore_paths, check_pacman=False)
-    for current_file in sync_tree[1]:
+    for current_file in sync_tree:
         print("\t" + str(current_file))
 
     for enum_state, status_string in (
@@ -24,19 +24,12 @@ def walkbf(path: str) -> None:
             (GitSyncStatus.AHEAD, "Unsynced repositories"),
             (GitSyncStatus.CLEAN_SYNCED, "Clean repositories")):
         print(status_string + ":")
-        for current_file in [t.path for t in sync_tree[2]
+        for current_file in [t.path for t in git_repos
                              if t.git_status == enum_state]:
-            print("\t" + str(current_file))
-
-    for pacman_status, status_string in (
-            (PacmanSyncStatus.CHANGED, "Changed pacman file"),
-            (PacmanSyncStatus.CLEAN, "Clean pacman file")):
-        print(status_string + ":")
-        for current_file in [t.path for t in sync_tree[2]
-                             if t.pacman_status == pacman_status]:
             print("\t" + str(current_file))
 
 
 logging.basicConfig(level="DEBUG")
-walkbf('/home/lukas')
-# walkbf('/etc')
+# walkbf('/home/lukas')
+walkbf('/etc')
+# walkbf('/home/lukas/Downloads')
