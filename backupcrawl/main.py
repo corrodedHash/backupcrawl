@@ -1,11 +1,11 @@
 """Main file"""
 import logging
 from pathlib import Path
-import backupcrawler
-from backupcrawler import GitSyncStatus, PacmanSyncStatus
+from . import backupcrawler
+from .backupcrawler import GitSyncStatus, PacmanSyncStatus
 
 
-def walkbf(path: str) -> None:
+def main(path: str) -> None:
     """Main function"""
     ignore_paths = list(map(Path, ["/home/lukas/.npm",
                                    "/home/lukas/.cache",
@@ -38,7 +38,8 @@ def walkbf(path: str) -> None:
             print("\t" + str(pacman_file.path) + " " + pacman_file.package)
 
 
-logging.basicConfig(level="DEBUG")
-# walkbf('/home/lukas')
-walkbf('/etc')
-# walkbf('/home/lukas/Downloads')
+if __name__ == "__main__":
+    logging.basicConfig(level="DEBUG")
+    # walkbf('/home/lukas')
+    main('/etc')
+    # walkbf('/home/lukas/Downloads')

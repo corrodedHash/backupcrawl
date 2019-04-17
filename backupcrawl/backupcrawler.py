@@ -5,8 +5,8 @@ from typing import List, Tuple, Optional
 from pathlib import Path
 import enum
 import asyncio
-from git_check import GitSyncStatus, git_check_root, GitRepo
-from pacman_check import PacmanSyncStatus, PacmanFile, is_pacman_file
+from .git_check import GitSyncStatus, git_check_root, GitRepo
+from .pacman_check import PacmanSyncStatus, PacmanFile, is_pacman_file
 
 MODULE_LOGGER = logging.getLogger("backupcrawler")
 
