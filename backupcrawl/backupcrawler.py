@@ -4,8 +4,10 @@ import logging
 from typing import List, Tuple, Optional
 from pathlib import Path
 import enum
-import asyncio
-from .filter import base as crawlfilter
+from .filter.base import (WeirdFiletypeFilter, SymlinkFilter, PermissionFilter,
+                          IgnoreFilter, FilterType)
+from .filter.pacman import PacmanFilter
+from .filter.git import GitRootFilter, GitRepo
 
 MODULE_LOGGER = logging.getLogger("backupcrawler")
 
@@ -16,8 +18,8 @@ class FileScanResult(enum.Enum):
     VC = enum.auto()
 
 
-async def _git_crawl(root: Path,
-                     filter_chain: List[crawlfilter.FilterType]) \
+def crawl(root: Path,
+          filter_chain: List[FilterType]) \
         -> Tuple[bool, List[Path]]:
     """Iterates depth first looking for git repositories"""
     MODULE_LOGGER.debug("Entering %s", root)
@@ -34,7 +36,7 @@ async def _git_crawl(root: Path,
                 break
         else:
 
-            current_result = await _git_crawl(current_file, filter_chain)
+            current_result = _git_crawl(current_file, filter_chain)
 
             if current_result[0]:
                 result.extend(current_result[1])
@@ -45,14 +47,32 @@ async def _git_crawl(root: Path,
     return (split_tree, result)
 
 
-def scan(root: Path,
-         ignore_paths: Optional[List[Path]] = None) \
-        -> Tuple[List[Path], List[GitRepo], List[PacmanFile]]:
+def arch_scan(root: Path,
+              ignore_paths: Optional[List[Path]] = None) -> None:
     """Scan the given path for files that are not backed up"""
     if not ignore_paths:
         ignore_paths = []
 
-    _, paths, repos, pacman_files = asyncio.run(
-        _git_crawl(root, ignore_paths=ignore_paths))
+    filter_chain: List[FilterType] = []
+    filter_chain.append(IgnoreFilter(ignore_paths))
+    filter_chain.append(SymlinkFilter())
+    filter_chain.append(WeirdFiletypeFilter())
+    filter_chain.append(PermissionFilter())
+    git_filter = GitRootFilter()
+    pacman_filter = PacmanFilter()
+    filter_chain.append(git_filter)
+    filter_chain.append(pacman_filter)
 
-    return (paths, repos, pacman_files)
+    _, paths = crawl(root, filter_chain)
+
+    for path in paths:
+        print(f"{path}")
+    for name, git_paths in [
+            ("Dirty git repositories", git_filter.dirty_repos),
+            ("Ahead git repositories", git_filter.unsynced_repos),
+            ("Clean git repositories", git_filter.clean_repos),
+            ("Changed pacman files", pacman_filter.changed_files),
+            ("Clean pacman files", pacman_filter.clean_files)]:
+        print(f"{name}:")
+        for path in git_paths:
+            print(f"\t{path}")

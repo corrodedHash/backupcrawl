@@ -1,11 +1,12 @@
 """Pacman check"""
 import subprocess
 import enum
-from typing import Dict
+from typing import Dict, List, Tuple
 from pathlib import Path
 from dataclasses import dataclass
 import tarfile
 import logging
+from .base import FilterResult
 MODULE_LOGGER = logging.getLogger("backupcrawl.pacman_check")
 
 
@@ -61,22 +62,30 @@ def _pacman_differs_slow(filepath: Path, package: str) -> PacmanSyncStatus:
     package_entry_stream = package_archive.extractfile(package_entry_info)
     assert package_entry_stream
     with open(filepath, mode='rb') as real_path_stream:
-        BLOCKSIZE = 1024 * 16
-        package_block = package_entry_stream.read(BLOCKSIZE)
-        real_block = real_path_stream.read(BLOCKSIZE)
+        blocksize = 1024 * 16
+        package_block = package_entry_stream.read(blocksize)
+        real_block = real_path_stream.read(blocksize)
         while real_block:
             MODULE_LOGGER.debug("Round tick")
             if package_block != real_block:
                 return PacmanSyncStatus.CHANGED
-            package_block = package_entry_stream.read(BLOCKSIZE)
-            real_block = real_path_stream.read(BLOCKSIZE)
+            package_block = package_entry_stream.read(blocksize)
+            real_block = real_path_stream.read(blocksize)
 
     return PacmanSyncStatus.CLEAN
 
 
-def is_pacman_file(filepath: Path) -> PacmanFile:
-    """Checks if a single file is managed by pacman, returns the package"""
+class PacmanFilter:
+    file_dict: Dict[str, str]
+    clean_files: List[Tuple[Path, str]]
+    changed_files: List[Tuple[Path, str]]
 
+    def __init__(self) -> None:
+        self.file_dict = self._initialize_dict()
+        self.clean_files = []
+        self.changed_files = []
+
+    @staticmethod
     def _initialize_dict() -> Dict[str, str]:
         pacman_output = subprocess.run(
             ["pacman", "-Ql"], stdout=subprocess.PIPE)
@@ -87,18 +96,21 @@ def is_pacman_file(filepath: Path) -> PacmanFile:
                     .splitlines()))}
         return result
 
-    if not is_pacman_file.file_dict:
-        is_pacman_file.file_dict = _initialize_dict()
-        assert is_pacman_file.file_dict
-    try:
-        pacman_pkg = is_pacman_file.file_dict[str(filepath)]
-    except KeyError:
-        return PacmanFile(path=filepath, status=PacmanSyncStatus.NOPAC)
+    def __call__(self, current_file: Path) -> FilterResult:
+        """Checks if a single file is managed by pacman, returns the package"""
 
-    return PacmanFile(
-        path=filepath,
-        status=_pacman_differs(filepath),
-        package=pacman_pkg)
+        if not current_file.is_file():
+            return (False, False)
 
+        try:
+            pacman_pkg = self.file_dict[str(current_file)]
+        except KeyError:
+            return (False, False)
 
-setattr(is_pacman_file, 'file_dict', None)
+        status = _pacman_differs(current_file)
+
+        if status == PacmanSyncStatus.CHANGED:
+            self.changed_files.append((current_file, pacman_pkg))
+        elif status == PacmanSyncStatus.CLEAN:
+            self.clean_files.append((current_file, pacman_pkg))
+        return (True, True)

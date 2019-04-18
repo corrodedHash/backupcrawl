@@ -21,6 +21,8 @@ def SymlinkFilter() -> FilterType:
 
 def PermissionFilter() -> FilterType:
     def _internal_filter(current_file: Path) -> FilterResult:
+        if not current_file.is_dir():
+            return (False, False)
         try:
             (current_file / 'hehehehe').exists()
         except PermissionError:

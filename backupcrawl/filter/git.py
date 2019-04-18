@@ -4,6 +4,8 @@ import enum
 from pathlib import Path
 import logging
 from dataclasses import dataclass
+from typing import List
+from .base import FilterResult
 MODULE_LOGGER = logging.getLogger('backupcrawl.git_check')
 
 
@@ -58,3 +60,31 @@ def git_check_root(path: Path) -> GitRepo:
         return GitRepo(path=path, status=GitSyncStatus.AHEAD)
 
     return GitRepo(path=path, status=GitSyncStatus.CLEAN_SYNCED)
+
+
+class GitRootFilter:
+    clean_repos: List[Path]
+    dirty_repos: List[Path]
+    unsynced_repos: List[Path]
+
+    def __init__(self) -> None:
+        self.clean_repos = []
+        self.dirty_repos = []
+        self.unsynced_repos = []
+
+    def __call__(self, current_file: Path) -> FilterResult:
+
+        if not current_file.is_dir():
+            return(False, False)
+
+        result = _git_check_ahead(current_file)
+        if result == GitSyncStatus.NOGIT:
+            return (False, False)
+        if result == GitSyncStatus.DIRTY:
+            self.dirty_repos.append(current_file)
+        if result == GitSyncStatus.AHEAD:
+            self.unsynced_repos.append(current_file)
+        if result == GitSyncStatus.CLEAN_SYNCED:
+            self.clean_repos.append(current_file)
+
+        return (True, True)
