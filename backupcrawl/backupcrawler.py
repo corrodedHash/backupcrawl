@@ -36,7 +36,7 @@ def crawl(root: Path,
                 break
         else:
 
-            current_result = _git_crawl(current_file, filter_chain)
+            current_result = crawl(current_file, filter_chain)
 
             if current_result[0]:
                 result.extend(current_result[1])

@@ -34,7 +34,7 @@ def _git_check_ahead(path: Path) -> bool:
         cwd=path, stdout=subprocess.PIPE)
 
     if git_for_each.returncode != 0:
-        raise RuntimeError
+        raise RuntimeError(f"{str(path)}")
 
     return any(x in (b"'>'", b"'<>'", b"''")
                for x in git_for_each.stdout.splitlines())
@@ -42,24 +42,6 @@ def _git_check_ahead(path: Path) -> bool:
 
 def git_check_root(path: Path) -> GitRepo:
     """Checks if a git repository is clean"""
-    if not (path / '.git').is_dir():
-        return GitRepo(path=path, status=GitSyncStatus.NOGIT)
-
-    git_status = subprocess.run(
-        ["git", "status", "--porcelain"], cwd=path,
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-
-    MODULE_LOGGER.debug("Calling git shell command at %s", str(path))
-
-    assert git_status.returncode == 0
-
-    if git_status.stdout != b"":
-        return GitRepo(path=path, status=GitSyncStatus.DIRTY)
-
-    if _git_check_ahead(path):
-        return GitRepo(path=path, status=GitSyncStatus.AHEAD)
-
-    return GitRepo(path=path, status=GitSyncStatus.CLEAN_SYNCED)
 
 
 class GitRootFilter:
@@ -77,14 +59,26 @@ class GitRootFilter:
         if not current_file.is_dir():
             return(False, False)
 
-        result = _git_check_ahead(current_file)
-        if result == GitSyncStatus.NOGIT:
+        if not (current_file / '.git').is_dir():
             return (False, False)
-        if result == GitSyncStatus.DIRTY:
+
+        git_status = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=current_file,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+        MODULE_LOGGER.debug("Calling git shell command at %s", str(current_file))
+
+        assert git_status.returncode == 0
+
+        if git_status.stdout != b"":
             self.dirty_repos.append(current_file)
-        if result == GitSyncStatus.AHEAD:
+            return (True, True)
+
+        if _git_check_ahead(current_file):
             self.unsynced_repos.append(current_file)
-        if result == GitSyncStatus.CLEAN_SYNCED:
-            self.clean_repos.append(current_file)
+            return (True, True)
+
+        self.clean_repos.append(current_file)
+        return (True, True)
 
         return (True, True)
