@@ -57,10 +57,10 @@ class GitRootFilter:
     def __call__(self, current_file: Path) -> FilterResult:
 
         if not current_file.is_dir():
-            return(False, False)
+            return FilterResult.PASS
 
         if not (current_file / '.git').is_dir():
-            return (False, False)
+            return FilterResult.PASS 
 
         git_status = subprocess.run(
             ["git", "status", "--porcelain"], cwd=current_file,
@@ -72,13 +72,9 @@ class GitRootFilter:
 
         if git_status.stdout != b"":
             self.dirty_repos.append(current_file)
-            return (True, True)
-
-        if _git_check_ahead(current_file):
+        elif _git_check_ahead(current_file):
             self.unsynced_repos.append(current_file)
-            return (True, True)
+        else:
+            self.clean_repos.append(current_file)
 
-        self.clean_repos.append(current_file)
-        return (True, True)
-
-        return (True, True)
+        return FilterResult.DENY

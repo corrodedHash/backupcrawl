@@ -11,6 +11,6 @@ def main(path: str) -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(level="DEBUG")
-    # walkbf('/home/lukas')
-    main('/etc')
+    main('/home/lukas')
+    #main('/etc')
     # walkbf('/home/lukas/Downloads')

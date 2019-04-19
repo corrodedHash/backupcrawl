@@ -100,12 +100,12 @@ class PacmanFilter:
         """Checks if a single file is managed by pacman, returns the package"""
 
         if not current_file.is_file():
-            return (False, False)
+            return FilterResult.PASS
 
         try:
             pacman_pkg = self.file_dict[str(current_file)]
         except KeyError:
-            return (False, False)
+            return FilterResult.PASS
 
         status = _pacman_differs(current_file)
 
@@ -113,4 +113,4 @@ class PacmanFilter:
             self.changed_files.append((current_file, pacman_pkg))
         elif status == PacmanSyncStatus.CLEAN:
             self.clean_files.append((current_file, pacman_pkg))
-        return (True, True)
+        return FilterResult.DENY

@@ -1,9 +1,13 @@
 from typing import List, Tuple, Callable
 from pathlib import Path
+import enum
 
-FilterResult = Tuple[bool, bool]
+class FilterResult(enum.Enum):
+    PASS = enum.auto()
+    DENY = enum.auto()
+    IGNORE = enum.auto()
+
 FilterType = Callable[[Path], FilterResult]
-
 
 class IgnoreFilter:
     def __init__(self, ignore_list: List[Path]) -> None:
@@ -11,29 +15,32 @@ class IgnoreFilter:
 
     def __call__(self, current_file: Path) -> FilterResult:
         if current_file in self.ignore_list:
-            return (True, True)
-        return (False, False)
+            return FilterResult.IGNORE 
+        return FilterResult.PASS
 
 
 def SymlinkFilter() -> FilterType:
-    return lambda x: (Path.is_symlink(x), False)
+    return lambda x: FilterResult.IGNORE if Path.is_symlink(x) else FilterResult.PASS
 
 
 def PermissionFilter() -> FilterType:
     def _internal_filter(current_file: Path) -> FilterResult:
         if not current_file.is_dir():
-            return (False, False)
+            return FilterResult.PASS
         try:
             (current_file / 'hehehehe').exists()
         except PermissionError:
-            return (True, False)
-        return (False, False)
+            return FilterResult.IGNORE
+        return FilterResult.PASS 
     return _internal_filter
 
 
 def WeirdFiletypeFilter() -> FilterType:
     def _internal_filter(current_file: Path) -> FilterResult:
         if current_file.is_dir() or current_file.is_file:
-            return (False, False)
-        return (True, False)
+            return FilterResult.PASS 
+        return FilterResult.IGNORE 
     return _internal_filter
+
+def NotDirectoryFilter() -> FilterType:
+    return lambda path: FilterResult.PASS if Path.is_dir(path) else FilterResult.IGNORE

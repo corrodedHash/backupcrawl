@@ -5,7 +5,7 @@ from typing import List, Tuple, Optional
 from pathlib import Path
 import enum
 from .filter.base import (WeirdFiletypeFilter, SymlinkFilter, PermissionFilter,
-                          IgnoreFilter, FilterType)
+                          IgnoreFilter, FilterType, FilterResult, NotDirectoryFilter)
 from .filter.pacman import PacmanFilter
 from .filter.git import GitRootFilter, GitRepo
 
@@ -29,19 +29,23 @@ def crawl(root: Path,
     for current_file in root.iterdir():
 
         for filefilter in filter_chain:
-            breakflag, splitflag = filefilter(current_file)
-            if splitflag:
+            filterresult = filefilter(current_file)
+            if filterresult == FilterResult.DENY:
                 split_tree = True
-            if breakflag:
+                break
+            if filterresult == FilterResult.IGNORE:
                 break
         else:
 
-            current_result = crawl(current_file, filter_chain)
+            if current_file.is_dir():
+                current_result = crawl(current_file, filter_chain)
 
-            if current_result[0]:
-                result.extend(current_result[1])
-                split_tree = True
-            elif current_result[1]:
+                if current_result[0]:
+                    result.extend(current_result[1])
+                    split_tree = True
+                elif current_result[1]:
+                    result.append(current_file)
+            else:
                 result.append(current_file)
 
     return (split_tree, result)
@@ -60,8 +64,9 @@ def arch_scan(root: Path,
     filter_chain.append(PermissionFilter())
     git_filter = GitRootFilter()
     pacman_filter = PacmanFilter()
-    filter_chain.append(git_filter)
     filter_chain.append(pacman_filter)
+    filter_chain.append(NotDirectoryFilter())
+    filter_chain.append(git_filter)
 
     _, paths = crawl(root, filter_chain)
 
