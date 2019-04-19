@@ -41,6 +41,3 @@ def WeirdFiletypeFilter() -> FilterType:
             return FilterResult.PASS 
         return FilterResult.IGNORE 
     return _internal_filter
-
-def NotDirectoryFilter() -> FilterType:
-    return lambda path: FilterResult.PASS if Path.is_dir(path) else FilterResult.IGNORE

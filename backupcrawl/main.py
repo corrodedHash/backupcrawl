@@ -13,4 +13,4 @@ if __name__ == "__main__":
     logging.basicConfig(level="DEBUG")
     main('/home/lukas')
     #main('/etc')
-    # walkbf('/home/lukas/Downloads')
+    #main('/home/lukas/Downloads')

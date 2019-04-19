@@ -1,11 +1,12 @@
 """Contains BackupCrawler class"""
 
 import logging
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Union
 from pathlib import Path
 import enum
-from .filter.base import (WeirdFiletypeFilter, SymlinkFilter, PermissionFilter,
-                          IgnoreFilter, FilterType, FilterResult, NotDirectoryFilter)
+from .filter.base import (SymlinkFilter, PermissionFilter,
+                          IgnoreFilter, FilterType, FilterResult)
+from .filter.switch import Switch, FilterChain
 from .filter.pacman import PacmanFilter
 from .filter.git import GitRootFilter, GitRepo
 
@@ -19,7 +20,7 @@ class FileScanResult(enum.Enum):
 
 
 def crawl(root: Path,
-          filter_chain: List[FilterType]) \
+          filter_chain: FilterChain) \
         -> Tuple[bool, List[Path]]:
     """Iterates depth first looking for git repositories"""
     MODULE_LOGGER.debug("Entering %s", root)
@@ -27,16 +28,26 @@ def crawl(root: Path,
     split_tree: bool = False
 
     for current_file in root.iterdir():
-
-        for filefilter in filter_chain:
-            filterresult = filefilter(current_file)
-            if filterresult == FilterResult.DENY:
-                split_tree = True
+        current_chain = filter_chain
+        drop_file = True
+        while True:
+            drop_file = True
+            for filefilter in current_chain[0]:
+                filterresult = filefilter(current_file)
+                if filterresult == FilterResult.DENY:
+                    split_tree = True
+                    break
+                if filterresult == FilterResult.IGNORE:
+                    break
+            else:
+                drop_file = False
+            if drop_file:
                 break
-            if filterresult == FilterResult.IGNORE:
+            if current_chain[1]:
+                current_chain = current_chain[1].get_branch(current_file)
+            else:
                 break
-        else:
-
+        if not drop_file:
             if current_file.is_dir():
                 current_result = crawl(current_file, filter_chain)
 
@@ -45,7 +56,7 @@ def crawl(root: Path,
                     split_tree = True
                 elif current_result[1]:
                     result.append(current_file)
-            else:
+            elif current_file.is_file():
                 result.append(current_file)
 
     return (split_tree, result)
@@ -57,16 +68,22 @@ def arch_scan(root: Path,
     if not ignore_paths:
         ignore_paths = []
 
-    filter_chain: List[FilterType] = []
-    filter_chain.append(IgnoreFilter(ignore_paths))
-    filter_chain.append(SymlinkFilter())
-    filter_chain.append(WeirdFiletypeFilter())
-    filter_chain.append(PermissionFilter())
-    git_filter = GitRootFilter()
     pacman_filter = PacmanFilter()
-    filter_chain.append(pacman_filter)
-    filter_chain.append(NotDirectoryFilter())
-    filter_chain.append(git_filter)
+    git_filter = GitRootFilter()
+
+    is_dir_switch = Switch(lambda path: Path.is_dir(path))
+    is_dir_switch.true_branch[0].append(git_filter)
+    is_dir_switch.false_branch[0].append(lambda x: FilterResult.IGNORE)
+
+    is_file_switch = Switch(lambda path: Path.is_file(path))
+    is_file_switch.true_branch[0].append(pacman_filter)
+    is_file_switch.false_branch = ([], 
+            is_dir_switch)
+
+    filter_chain: FilterChain = [[], is_file_switch] 
+    filter_chain[0].append(IgnoreFilter(ignore_paths))
+    filter_chain[0].append(SymlinkFilter())
+    filter_chain[0].append(PermissionFilter())
 
     _, paths = crawl(root, filter_chain)
 
