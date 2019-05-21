@@ -1,11 +1,12 @@
 """Pacman check"""
 import subprocess
 import enum
-from typing import Dict
+from typing import Dict, Optional
 from pathlib import Path
 from dataclasses import dataclass
 import tarfile
 import logging
+import asyncio
 MODULE_LOGGER = logging.getLogger("backupcrawl.pacman_check")
 
 
@@ -24,12 +25,14 @@ class PacmanFile():
     package: str = ""
 
 
-def _pacman_differs(filepath: Path) -> PacmanSyncStatus:
+async def _pacman_differs(filepath: Path) -> PacmanSyncStatus:
     """Check if a pacman controlled file is clean"""
-    pacman_status = subprocess.run(
-        ["pacfile", "--check", str(filepath)], stdout=subprocess.PIPE)
+    pacman_process = await asyncio.create_subprocess_shell(
+        f"pacfile --check {filepath}",
+        stdout=asyncio.subprocess.PIPE)
 
-    pacman_output = pacman_status.stdout.decode('utf-8')
+    pacman_bytes_stdout, _ = await pacman_process.communicate()
+    pacman_output = pacman_bytes_stdout.decode()
 
     if pacman_output.startswith("no package owns"):
         raise AssertionError
@@ -74,31 +77,33 @@ def _pacman_differs_slow(filepath: Path, package: str) -> PacmanSyncStatus:
     return PacmanSyncStatus.CLEAN
 
 
-def is_pacman_file(filepath: Path) -> PacmanFile:
+def _initialize_dict() -> Dict[str, str]:
+    pacman_output = subprocess.run(
+        ["pacman", "-Ql"], stdout=subprocess.PIPE)
+    result = {
+        path: package for package, path in (
+            l.split(maxsplit=1) for l in (
+                l for l in pacman_output.stdout.decode('utf-8')
+                .splitlines()))}
+    return result
+
+
+_FILE_DICT: Optional[Dict[str, str]] = None
+
+
+async def is_pacman_file(filepath: Path) -> PacmanFile:
     """Checks if a single file is managed by pacman, returns the package"""
 
-    def _initialize_dict() -> Dict[str, str]:
-        pacman_output = subprocess.run(
-            ["pacman", "-Ql"], stdout=subprocess.PIPE)
-        result = {
-            path: package for package, path in (
-                l.split(maxsplit=1) for l in (
-                    l for l in pacman_output.stdout.decode('utf-8')
-                    .splitlines()))}
-        return result
-
-    if not is_pacman_file.file_dict:
-        is_pacman_file.file_dict = _initialize_dict()
-        assert is_pacman_file.file_dict
+    global _FILE_DICT
+    if _FILE_DICT is None:
+        _FILE_DICT = _initialize_dict()
+        assert _FILE_DICT is not None
     try:
-        pacman_pkg = is_pacman_file.file_dict[str(filepath)]
+        pacman_pkg = _FILE_DICT[str(filepath)]
     except KeyError:
         return PacmanFile(path=filepath, status=PacmanSyncStatus.NOPAC)
 
     return PacmanFile(
         path=filepath,
-        status=_pacman_differs(filepath),
+        status=await _pacman_differs(filepath),
         package=pacman_pkg)
-
-
-setattr(is_pacman_file, 'file_dict', None)

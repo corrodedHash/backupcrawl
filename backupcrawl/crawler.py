@@ -30,14 +30,13 @@ async def _git_crawl(root: Path,
     for current_file in root.iterdir():
 
         if current_file in ignore_paths:
-            split_tree = True
             continue
 
         if current_file.is_symlink():
             continue
 
         if current_file.is_file():
-            pac_result = is_pacman_file(current_file)
+            pac_result = await is_pacman_file(current_file)
             if pac_result.status == PacmanSyncStatus.NOPAC:
                 result.append(current_file)
                 continue
