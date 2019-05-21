@@ -1,8 +1,8 @@
 """Git check"""
-import subprocess
 import enum
 from pathlib import Path
 import logging
+import asyncio
 from dataclasses import dataclass
 MODULE_LOGGER = logging.getLogger('backupcrawl.git_check')
 
@@ -22,39 +22,45 @@ class GitRepo():
     status: GitSyncStatus = GitSyncStatus.NOGIT
 
 
-def _git_check_ahead(path: Path) -> bool:
+async def _git_check_ahead(path: Path) -> bool:
     """Checks if a git repository got a branch that
     is ahead of the remote branch"""
 
-    git_for_each = subprocess.run(
-        ["git", "for-each-ref",
-         "--format='%(upstream:trackshort)'", "refs/heads"],
-        cwd=path, stdout=subprocess.PIPE)
+    git_process = await asyncio.create_subprocess_shell(
+        "git for-each-ref --format='%(upstream:trackshort)' refs/head",
+        cwd=path,
+        stdout=asyncio.subprocess.PIPE)
 
-    if git_for_each.returncode != 0:
+    git_bytes_stdout, _ = await git_process.communicate()
+
+    if git_process.returncode != 0:
         raise RuntimeError
 
     return any(x in (b"'>'", b"'<>'", b"''")
-               for x in git_for_each.stdout.splitlines())
+               for x in git_bytes_stdout.splitlines())
 
 
-def git_check_root(path: Path) -> GitRepo:
+async def git_check_root(path: Path) -> GitRepo:
     """Checks if a git repository is clean"""
     if not (path / '.git').is_dir():
         return GitRepo(path=path, status=GitSyncStatus.NOGIT)
 
-    git_status = subprocess.run(
-        ["git", "status", "--porcelain"], cwd=path,
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    git_process = await asyncio.create_subprocess_shell(
+        "git status --porcelain",
+        cwd=path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL)
+
+    git_bytes_stdout, _ = await git_process.communicate()
 
     MODULE_LOGGER.debug("Calling git shell command at %s", str(path))
 
-    assert git_status.returncode == 0
+    assert git_process.returncode == 0
 
-    if git_status.stdout != b"":
+    if git_bytes_stdout != b"":
         return GitRepo(path=path, status=GitSyncStatus.DIRTY)
 
-    if _git_check_ahead(path):
+    if await _git_check_ahead(path):
         return GitRepo(path=path, status=GitSyncStatus.AHEAD)
 
     return GitRepo(path=path, status=GitSyncStatus.CLEAN_SYNCED)

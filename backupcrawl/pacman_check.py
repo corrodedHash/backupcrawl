@@ -77,13 +77,18 @@ def _pacman_differs_slow(filepath: Path, package: str) -> PacmanSyncStatus:
     return PacmanSyncStatus.CLEAN
 
 
-def _initialize_dict() -> Dict[str, str]:
-    pacman_output = subprocess.run(
-        ["pacman", "-Ql"], stdout=subprocess.PIPE)
+async def _initialize_dict() -> Dict[str, str]:
+    pacman_process = await asyncio.create_subprocess_shell(
+        "pacman -Ql",
+        stdout=asyncio.subprocess.PIPE)
+
+    pacman_bytes_stdout, _ = await pacman_process.communicate()
+    pacman_output = pacman_bytes_stdout.decode()
+
     result = {
         path: package for package, path in (
             l.split(maxsplit=1) for l in (
-                l for l in pacman_output.stdout.decode('utf-8')
+                l for l in pacman_output
                 .splitlines()))}
     return result
 
@@ -96,7 +101,7 @@ async def is_pacman_file(filepath: Path) -> PacmanFile:
 
     global _FILE_DICT
     if _FILE_DICT is None:
-        _FILE_DICT = _initialize_dict()
+        _FILE_DICT = await _initialize_dict()
         assert _FILE_DICT is not None
     try:
         pacman_pkg = _FILE_DICT[str(filepath)]

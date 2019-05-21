@@ -55,7 +55,7 @@ async def _git_crawl(root: Path,
             print(f"No permissions for {str(current_file)}")
             continue
 
-        git_status = git_check_root(current_file)
+        git_status = await git_check_root(current_file)
         if git_status.status != GitSyncStatus.NOGIT:
             repo_info.append(git_status)
             split_tree = True
