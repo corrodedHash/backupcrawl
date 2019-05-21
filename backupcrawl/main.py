@@ -1,12 +1,14 @@
 """Main file"""
 import logging
 from pathlib import Path
-from . import backupcrawler
-from .backupcrawler import GitSyncStatus, PacmanSyncStatus
+import argparse
+
+from . import crawler
+from .crawler import GitSyncStatus, PacmanSyncStatus
 
 
-def main(path: str) -> None:
-    """Main function"""
+def crawl(path: str) -> None:
+    """Crawl given directory"""
     ignore_paths = list(map(Path, ["/home/lukas/.npm",
                                    "/home/lukas/.cache",
                                    "/home/lukas/.mypy_cache",
@@ -14,7 +16,7 @@ def main(path: str) -> None:
                                    "/home/lukas/.debug",
                                    "/home/lukas/.vscode",
                                    "/home/lukas/.vim/bundle", ]))
-    sync_tree, git_repos, pacman_files = backupcrawler.scan(
+    sync_tree, git_repos, pacman_files = crawler.scan(
         Path(path), ignore_paths=ignore_paths)
     for standard_file in sync_tree:
         print("\t" + str(standard_file))
@@ -38,8 +40,20 @@ def main(path: str) -> None:
             print("\t" + str(pacman_file.path) + " " + pacman_file.package)
 
 
+def main() -> None:
+    """Main function"""
+    parser = argparse.ArgumentParser(
+        description="Search for non-backed up files")
+    parser.add_argument('path', type=Path, default=Path('/'))
+    parser.add_argument('-v', action='store_true')
+    args = parser.parse_args()
+    logging.basicConfig(level="WARNING")
+    if args.v:
+        logging.getLogger("backupcrawl").setLevel("DEBUG")
+    else:
+        logging.getLogger("backupcrawl").setLevel("WARNING")
+    crawl(args.path)
+
+
 if __name__ == "__main__":
-    logging.basicConfig(level="DEBUG")
-    # walkbf('/home/lukas')
-    main('/etc')
-    # walkbf('/home/lukas/Downloads')
+    main()

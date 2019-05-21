@@ -1,4 +1,4 @@
-"""Contains BackupCrawler class"""
+"""Contains crawling functions"""
 
 import logging
 from typing import List, Tuple, Optional
@@ -8,7 +8,7 @@ import asyncio
 from .git_check import GitSyncStatus, git_check_root, GitRepo
 from .pacman_check import PacmanSyncStatus, PacmanFile, is_pacman_file
 
-MODULE_LOGGER = logging.getLogger("backupcrawler")
+MODULE_LOGGER = logging.getLogger("backupcrawl.crawler")
 
 
 class FileScanResult(enum.Enum):
