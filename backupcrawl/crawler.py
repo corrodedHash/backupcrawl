@@ -3,7 +3,6 @@
 import logging
 from typing import List, Tuple, Optional
 from pathlib import Path
-import enum
 import asyncio
 from .git_check import GitSyncStatus, git_check_root, GitRepo
 from .pacman_check import PacmanSyncStatus, PacmanFile, is_pacman_file
@@ -11,21 +10,33 @@ from .pacman_check import PacmanSyncStatus, PacmanFile, is_pacman_file
 MODULE_LOGGER = logging.getLogger("backupcrawl.crawler")
 
 
-class FileScanResult(enum.Enum):
-    """Whether or not a subtree contains a versioncontrolled directory"""
-    NO_VC = enum.auto()
-    VC = enum.auto()
+# This could be a dataclass, but pylint doesnt understand right now
+class CrawlResult:
+    """Result from crawl of a single directory"""
+    def __init__(self) -> None:
+
+        self.loose_paths: List[Path] = list()
+        self.repo_info: List[GitRepo] = list()
+        self.pacman_files: List[PacmanFile] = list()
+        self.split_tree: bool = False
+
+    def extend(self, other: 'CrawlResult', current_file: Path) -> None:
+        """Extend current object with another crawl result"""
+        self.repo_info.extend(other.repo_info)
+        self.pacman_files.extend(other.pacman_files)
+        if other.split_tree:
+            self.loose_paths.extend(other.loose_paths)
+            self.split_tree = True
+        elif other.loose_paths:
+            self.loose_paths.append(current_file)
 
 
-async def _git_crawl(root: Path,
+async def _dir_crawl(root: Path,
                      ignore_paths: List[Path]) \
-        -> Tuple[bool, List[Path], List[GitRepo], List[PacmanFile]]:
+        -> CrawlResult:
     """Iterates depth first looking for git repositories"""
     MODULE_LOGGER.debug("Entering %s", root)
-    result: List[Path] = []
-    repo_info: List[GitRepo] = []
-    split_tree: bool = False
-    pacman_files: List[PacmanFile] = []
+    result = CrawlResult()
 
     for current_file in root.iterdir():
 
@@ -38,10 +49,10 @@ async def _git_crawl(root: Path,
         if current_file.is_file():
             pac_result = await is_pacman_file(current_file)
             if pac_result.status == PacmanSyncStatus.NOPAC:
-                result.append(current_file)
+                result.loose_paths.append(current_file)
                 continue
-            pacman_files.append(pac_result)
-            split_tree = True
+            result.pacman_files.append(pac_result)
+            result.split_tree = True
             continue
 
         if not current_file.is_dir():
@@ -57,20 +68,14 @@ async def _git_crawl(root: Path,
 
         git_status = await git_check_root(current_file)
         if git_status.status != GitSyncStatus.NOGIT:
-            repo_info.append(git_status)
-            split_tree = True
+            result.repo_info.append(git_status)
+            result.split_tree = True
             continue
 
-        current_result = await _git_crawl(current_file, ignore_paths)
-        repo_info.extend(current_result[2])
-        pacman_files.extend(current_result[3])
-        if current_result[0]:
-            result.extend(current_result[1])
-            split_tree = True
-        elif current_result[1]:
-            result.append(current_file)
+        current_result = await _dir_crawl(current_file, ignore_paths)
+        result.extend(current_result, current_file)
 
-    return (split_tree, result, repo_info, pacman_files)
+    return result
 
 
 def scan(root: Path,
@@ -80,7 +85,10 @@ def scan(root: Path,
     if not ignore_paths:
         ignore_paths = []
 
-    _, paths, repos, pacman_files = asyncio.run(
-        _git_crawl(root, ignore_paths=ignore_paths))
+    crawl_result = asyncio.run(
+        _dir_crawl(root, ignore_paths=ignore_paths))
 
-    return (paths, repos, pacman_files)
+    return (
+        crawl_result.loose_paths,
+        crawl_result.repo_info,
+        crawl_result.pacman_files)

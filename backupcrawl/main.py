@@ -48,10 +48,7 @@ def main() -> None:
     parser.add_argument('-v', action='store_true')
     args = parser.parse_args()
     logging.basicConfig(level="WARNING")
-    if args.v:
-        logging.getLogger("backupcrawl").setLevel("DEBUG")
-    else:
-        logging.getLogger("backupcrawl").setLevel("WARNING")
+    logging.getLogger("backupcrawl").setLevel("DEBUG" if args.v else "WARNING")
     crawl(args.path)
 
 

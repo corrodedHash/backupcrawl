@@ -1,5 +1,4 @@
 """Pacman check"""
-import subprocess
 import enum
 from typing import Dict, Optional
 from pathlib import Path
