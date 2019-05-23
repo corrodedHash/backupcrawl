@@ -63,7 +63,7 @@ async def _dir_crawl(root: Path,
         try:
             (current_file / 'hehehehe').exists()
         except PermissionError:
-            print(f"No permissions for {str(current_file)}")
+            MODULE_LOGGER.warning("No permissions for %s", str(current_file))
             continue
 
         git_status = await git_check_root(current_file)

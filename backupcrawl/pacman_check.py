@@ -49,33 +49,6 @@ async def _pacman_differs(filepath: Path) -> PacmanSyncStatus:
     return PacmanSyncStatus.CLEAN
 
 
-def _pacman_differs_slow(filepath: Path, package: str) -> PacmanSyncStatus:
-    MODULE_LOGGER.debug("Calculating for %s in %s", filepath, package)
-    package_archive_names = list(Path(
-        '/var/cache/pacman/pkg').glob(package + "*.pkg.tar.xz"))
-    assert package_archive_names
-    package_archive_names.sort()
-    package_name = package_archive_names[-1]
-
-    package_archive = tarfile.open(
-        name=Path('/var/cache/pacman/pkg') / package_name, mode="r:xz")
-    package_entry_info = package_archive.getmember(str(filepath).strip('/'))
-    package_entry_stream = package_archive.extractfile(package_entry_info)
-    assert package_entry_stream
-    with open(filepath, mode='rb') as real_path_stream:
-        BLOCKSIZE = 1024 * 16
-        package_block = package_entry_stream.read(BLOCKSIZE)
-        real_block = real_path_stream.read(BLOCKSIZE)
-        while real_block:
-            MODULE_LOGGER.debug("Round tick")
-            if package_block != real_block:
-                return PacmanSyncStatus.CHANGED
-            package_block = package_entry_stream.read(BLOCKSIZE)
-            real_block = real_path_stream.read(BLOCKSIZE)
-
-    return PacmanSyncStatus.CLEAN
-
-
 async def _initialize_dict() -> Dict[str, str]:
     pacman_process = await asyncio.create_subprocess_shell(
         "pacman -Ql",

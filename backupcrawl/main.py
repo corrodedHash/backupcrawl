@@ -30,7 +30,6 @@ def crawl(path: str) -> None:
                         if t.status == enum_state]:
             print("\t" + str(git_dir))
 
-    print("Managed by pacman:")
     for pacman_status, status_string in (
             (PacmanSyncStatus.CHANGED, "Changed pacman files"),
             (PacmanSyncStatus.CLEAN, "Clean pacman files")):
