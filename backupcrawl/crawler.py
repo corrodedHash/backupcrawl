@@ -43,12 +43,14 @@ class CrawlResult:
 
 
 async def _dir_crawl(root: Path,
-                     ignore_paths: List[str]) \
+                     ignore_paths: List[str],
+                     processes: asyncio.Semaphore) \
         -> CrawlResult:
     """Iterates depth first looking for git repositories"""
     MODULE_LOGGER.info("Entering %s", root)
     result = CrawlResult()
     pacman_calls = []
+    recursive_calls = []
 
     for current_file in root.iterdir():
 
@@ -82,8 +84,17 @@ async def _dir_crawl(root: Path,
             result.split_tree = True
             continue
 
-        current_result = await _dir_crawl(current_file, ignore_paths)
-        result.extend(current_result, current_file)
+        recursive_calls.append(
+            (asyncio.create_task(
+                _dir_crawl(
+                    current_file,
+                    ignore_paths,
+                    processes)),
+                current_file))
+
+    for recursive_result, current_file in [
+            (await x, y) for x, y in recursive_calls]:
+        result.extend(recursive_result, current_file)
 
     for pacman_result in [await x for x in pacman_calls]:
         result.append_pacman(pacman_result)

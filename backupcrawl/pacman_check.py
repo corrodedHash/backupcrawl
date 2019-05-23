@@ -63,17 +63,14 @@ async def _initialize_dict() -> Dict[str, str]:
                 .splitlines()))}
     return result
 
-
-_FILE_DICT: Optional[Dict[str, str]] = None
+_FILE_DICT: Dict[str, str] = asyncio.run(_initialize_dict())
 
 
 async def is_pacman_file(filepath: Path) -> PacmanFile:
     """Checks if a single file is managed by pacman, returns the package"""
 
     global _FILE_DICT
-    if _FILE_DICT is None:
-        _FILE_DICT = await _initialize_dict()
-        assert _FILE_DICT is not None
+
     try:
         pacman_pkg = _FILE_DICT[str(filepath)]
     except KeyError:
