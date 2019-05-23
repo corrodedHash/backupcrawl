@@ -13,6 +13,7 @@ MODULE_LOGGER = logging.getLogger("backupcrawl.crawler")
 # This could be a dataclass, but pylint doesnt understand right now
 class CrawlResult:
     """Result from crawl of a single directory"""
+
     def __init__(self) -> None:
 
         self.loose_paths: List[Path] = list()
@@ -29,6 +30,14 @@ class CrawlResult:
             self.split_tree = True
         elif other.loose_paths:
             self.loose_paths.append(current_file)
+
+    def append_pacman(self, status: PacmanFile) -> None:
+        """Append a pacman file to the crawl result"""
+        if status.status == PacmanSyncStatus.NOPAC:
+            self.loose_paths.append(status.path)
+            return
+        self.pacman_files.append(status)
+        self.split_tree = True
 
 
 async def _dir_crawl(root: Path,
@@ -48,11 +57,7 @@ async def _dir_crawl(root: Path,
 
         if current_file.is_file():
             pac_result = await is_pacman_file(current_file)
-            if pac_result.status == PacmanSyncStatus.NOPAC:
-                result.loose_paths.append(current_file)
-                continue
-            result.pacman_files.append(pac_result)
-            result.split_tree = True
+            result.append_pacman(pac_result)
             continue
 
         if not current_file.is_dir():
