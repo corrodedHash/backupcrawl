@@ -27,7 +27,8 @@ async def _pacman_differs(filepath: Path) -> PacmanSyncStatus:
     """Check if a pacman controlled file is clean"""
     pacman_process = await asyncio.create_subprocess_shell(
         f"pacfile --check {filepath}",
-        stdout=asyncio.subprocess.PIPE)
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL)
 
     pacman_bytes_stdout, _ = await pacman_process.communicate()
     pacman_output = pacman_bytes_stdout.decode()

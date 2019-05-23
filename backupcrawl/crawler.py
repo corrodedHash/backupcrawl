@@ -44,7 +44,7 @@ class CrawlResult:
 
 async def _dir_crawl(root: Path,
                      ignore_paths: List[str],
-                     processes: asyncio.Semaphore) \
+                     ) \
         -> CrawlResult:
     """Iterates depth first looking for git repositories"""
     MODULE_LOGGER.info("Entering %s", root)
@@ -89,7 +89,7 @@ async def _dir_crawl(root: Path,
                 _dir_crawl(
                     current_file,
                     ignore_paths,
-                    processes)),
+                    )),
                 current_file))
 
     for recursive_result, current_file in [
@@ -110,7 +110,7 @@ def scan(root: Path,
         ignore_paths = []
 
     crawl_result = asyncio.run(
-        _dir_crawl(root, ignore_paths=ignore_paths))
+        _dir_crawl(root, ignore_paths=ignore_paths), debug=True)
 
     return (
         crawl_result.loose_paths,
