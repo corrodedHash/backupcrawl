@@ -3,7 +3,6 @@ import enum
 from typing import Dict, Optional
 from pathlib import Path
 from dataclasses import dataclass
-import tarfile
 import logging
 import asyncio
 MODULE_LOGGER = logging.getLogger("backupcrawl.pacman_check")
@@ -79,6 +78,7 @@ async def is_pacman_file(filepath: Path) -> PacmanFile:
         pacman_pkg = _FILE_DICT[str(filepath)]
     except KeyError:
         return PacmanFile(path=filepath, status=PacmanSyncStatus.NOPAC)
+    MODULE_LOGGER.info("Calling pacfile command on %s", str(filepath))
 
     return PacmanFile(
         path=filepath,

@@ -53,7 +53,7 @@ async def git_check_root(path: Path) -> GitRepo:
 
     git_bytes_stdout, _ = await git_process.communicate()
 
-    MODULE_LOGGER.debug("Calling git shell command at %s", str(path))
+    MODULE_LOGGER.info("Calling git shell command at %s", str(path))
 
     assert git_process.returncode == 0
 

@@ -46,8 +46,9 @@ async def _dir_crawl(root: Path,
                      ignore_paths: List[str]) \
         -> CrawlResult:
     """Iterates depth first looking for git repositories"""
-    MODULE_LOGGER.debug("Entering %s", root)
+    MODULE_LOGGER.info("Entering %s", root)
     result = CrawlResult()
+    pacman_calls = []
 
     for current_file in root.iterdir():
 
@@ -59,8 +60,9 @@ async def _dir_crawl(root: Path,
             continue
 
         if current_file.is_file():
-            pac_result = await is_pacman_file(current_file)
-            result.append_pacman(pac_result)
+            pacman_calls.append(
+                asyncio.create_task(
+                    is_pacman_file(current_file)))
             continue
 
         if not current_file.is_dir():
@@ -82,6 +84,9 @@ async def _dir_crawl(root: Path,
 
         current_result = await _dir_crawl(current_file, ignore_paths)
         result.extend(current_result, current_file)
+
+    for pacman_result in [await x for x in pacman_calls]:
+        result.append_pacman(pacman_result)
 
     return result
 
