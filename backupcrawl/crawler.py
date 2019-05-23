@@ -3,6 +3,7 @@
 import logging
 from typing import List, Tuple, Optional
 from pathlib import Path
+import fnmatch
 import asyncio
 from .git_check import GitSyncStatus, git_check_root, GitRepo
 from .pacman_check import PacmanSyncStatus, PacmanFile, is_pacman_file
@@ -10,7 +11,8 @@ from .pacman_check import PacmanSyncStatus, PacmanFile, is_pacman_file
 MODULE_LOGGER = logging.getLogger("backupcrawl.crawler")
 
 
-# This could be a dataclass, but pylint doesnt understand right now
+# This could be a dataclass, but pylint doesnt understand dataclass.field
+# right now
 class CrawlResult:
     """Result from crawl of a single directory"""
 
@@ -41,7 +43,7 @@ class CrawlResult:
 
 
 async def _dir_crawl(root: Path,
-                     ignore_paths: List[Path]) \
+                     ignore_paths: List[str]) \
         -> CrawlResult:
     """Iterates depth first looking for git repositories"""
     MODULE_LOGGER.debug("Entering %s", root)
@@ -49,7 +51,8 @@ async def _dir_crawl(root: Path,
 
     for current_file in root.iterdir():
 
-        if current_file in ignore_paths:
+        if any(fnmatch.fnmatch(str(current_file), cur_pattern)
+               for cur_pattern in ignore_paths):
             continue
 
         if current_file.is_symlink():
@@ -84,7 +87,7 @@ async def _dir_crawl(root: Path,
 
 
 def scan(root: Path,
-         ignore_paths: Optional[List[Path]] = None) \
+         ignore_paths: Optional[List[str]] = None) \
         -> Tuple[List[Path], List[GitRepo], List[PacmanFile]]:
     """Scan the given path for files that are not backed up"""
     if not ignore_paths:

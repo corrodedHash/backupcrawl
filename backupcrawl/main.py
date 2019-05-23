@@ -9,15 +9,24 @@ from .crawler import GitSyncStatus, PacmanSyncStatus
 
 def crawl(path: str) -> None:
     """Crawl given directory"""
-    ignore_paths = list(map(Path, ["/home/lukas/.npm",
-                                   "/home/lukas/.cache",
-                                   "/home/lukas/.mypy_cache",
-                                   "/home/lukas/.aurget_build",
-                                   "/home/lukas/.debug",
-                                   "/home/lukas/.vscode",
-                                   "/home/lukas/.vim/bundle", ]))
+    ignore_paths = [
+        "/home/lukas/.npm",
+        "/home/lukas/.cache",
+        "/home/lukas/.mypy_cache",
+        "/home/lukas/.aurget_build",
+        "/home/lukas/.debug",
+        "/home/lukas/.vscode",
+        "/home/lukas/.vim/bundle",
+        "/home/lukas/.vim/spell",
+        "/home/lukas/.*history*",
+        "/home/lukas/.mozilla",
+        "/home/lukas/.ccache",
+        "/home/lukas/.pylint.d",
+    ]
+
     sync_tree, git_repos, pacman_files = crawler.scan(
         Path(path), ignore_paths=ignore_paths)
+
     for standard_file in sync_tree:
         print("\t" + str(standard_file))
 
