@@ -64,7 +64,8 @@ async def _dir_crawl(root: Path,
         if current_file.is_file():
             pacman_calls.append(
                 asyncio.create_task(
-                    is_pacman_file(current_file)))
+                    is_pacman_file(
+                        current_file)))
             continue
 
         if not current_file.is_dir():
@@ -89,15 +90,15 @@ async def _dir_crawl(root: Path,
                 _dir_crawl(
                     current_file,
                     ignore_paths,
-                    )),
+                )
+            ),
                 current_file))
 
-    for recursive_result, current_file in [
-            (await x, y) for x, y in recursive_calls]:
-        result.extend(recursive_result, current_file)
+    for recursive_call, current_file in recursive_calls:
+        result.extend(await recursive_call, current_file)
 
-    for pacman_result in [await x for x in pacman_calls]:
-        result.append_pacman(pacman_result)
+    for pacman_call in pacman_calls:
+        result.append_pacman(await pacman_call)
 
     return result
 
@@ -110,7 +111,11 @@ def scan(root: Path,
         ignore_paths = []
 
     crawl_result = asyncio.run(
-        _dir_crawl(root, ignore_paths=ignore_paths), debug=True)
+        _dir_crawl(
+            root,
+            ignore_paths=ignore_paths,
+        ), debug=True
+    )
 
     return (
         crawl_result.loose_paths,
