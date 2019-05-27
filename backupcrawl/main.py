@@ -22,6 +22,8 @@ def crawl(path: str) -> None:
         "/home/lukas/.mozilla",
         "/home/lukas/.ccache",
         "/home/lukas/.pylint.d",
+        "/home/lukas/.nv",
+        "/home/lukas/.zcompdump-*",
     ]
 
     sync_tree, git_repos, pacman_files = crawler.scan(
