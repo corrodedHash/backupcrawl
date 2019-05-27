@@ -67,18 +67,19 @@ async def _initialize_dict() -> Dict[str, str]:
 _FILE_DICT: Dict[str, str] = asyncio.run(_initialize_dict())
 
 
-async def is_pacman_file(filepath: Path) -> PacmanFile:
+async def is_pacman_file(filepath: Path, semaphore: asyncio.Semaphore) -> PacmanFile:
     """Checks if a single file is managed by pacman, returns the package"""
 
     global _FILE_DICT
 
-    try:
-        pacman_pkg = _FILE_DICT[str(filepath)]
-    except KeyError:
-        return PacmanFile(path=filepath, status=PacmanSyncStatus.NOPAC)
-    MODULE_LOGGER.info("Calling pacfile command on %s", str(filepath))
+    async with semaphore:
+        try:
+            pacman_pkg = _FILE_DICT[str(filepath)]
+        except KeyError:
+            return PacmanFile(path=filepath, status=PacmanSyncStatus.NOPAC)
+        MODULE_LOGGER.info("Calling pacfile command on %s", str(filepath))
 
-    return PacmanFile(
-        path=filepath,
-        status=await _pacman_differs(filepath),
-        package=pacman_pkg)
+        return PacmanFile(
+            path=filepath,
+            status=await _pacman_differs(filepath),
+            package=pacman_pkg)

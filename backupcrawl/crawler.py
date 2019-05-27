@@ -5,6 +5,7 @@ from typing import List, Tuple, Optional
 from pathlib import Path
 import fnmatch
 import asyncio
+import os
 from .git_check import GitSyncStatus, git_check_root, GitRepo
 from .pacman_check import PacmanSyncStatus, PacmanFile, is_pacman_file
 
@@ -44,6 +45,7 @@ class CrawlResult:
 
 async def _dir_crawl(root: Path,
                      ignore_paths: List[str],
+                     semaphore: asyncio.Semaphore,
                      ) \
         -> CrawlResult:
     """Iterates depth first looking for git repositories"""
@@ -52,47 +54,50 @@ async def _dir_crawl(root: Path,
     pacman_calls = []
     recursive_calls = []
 
-    for current_file in root.iterdir():
+    async with semaphore:
+        for current_file in root.iterdir():
 
-        if any(fnmatch.fnmatch(str(current_file), cur_pattern)
-               for cur_pattern in ignore_paths):
-            continue
+            if any(fnmatch.fnmatch(str(current_file), cur_pattern)
+                   for cur_pattern in ignore_paths):
+                continue
 
-        if current_file.is_symlink():
-            continue
+            if current_file.is_symlink():
+                continue
 
-        if current_file.is_file():
-            pacman_calls.append(
-                asyncio.create_task(
-                    is_pacman_file(
-                        current_file)))
-            continue
+            if current_file.is_file():
+                pacman_calls.append(
+                    asyncio.create_task(
+                        is_pacman_file(
+                            current_file,
+                            semaphore)))
+                continue
 
-        if not current_file.is_dir():
-            # If path is not a directory, or a file,
-            # it is some socket or pipe. We don't care
-            continue
+            if not current_file.is_dir():
+                # If path is not a directory, or a file,
+                # it is some socket or pipe. We don't care
+                continue
 
-        try:
-            (current_file / 'hehehehe').exists()
-        except PermissionError:
-            MODULE_LOGGER.warning("No permissions for %s", str(current_file))
-            continue
+            try:
+                (current_file / 'hehehehe').exists()
+            except PermissionError:
+                MODULE_LOGGER.warning(
+                    "No permissions for %s", str(current_file))
+                continue
 
-        git_status = await git_check_root(current_file)
-        if git_status.status != GitSyncStatus.NOGIT:
-            result.repo_info.append(git_status)
-            result.split_tree = True
-            continue
+            git_status = await git_check_root(current_file)
+            if git_status.status != GitSyncStatus.NOGIT:
+                result.repo_info.append(git_status)
+                result.split_tree = True
+                continue
 
-        recursive_calls.append(
-            (asyncio.create_task(
-                _dir_crawl(
-                    current_file,
-                    ignore_paths,
-                )
-            ),
-                current_file))
+            recursive_calls.append(
+                (asyncio.create_task(
+                    _dir_crawl(
+                        current_file,
+                        ignore_paths,
+                        semaphore,
+                    )
+                ), current_file))
 
     for recursive_call, current_file in recursive_calls:
         result.extend(await recursive_call, current_file)
@@ -103,6 +108,16 @@ async def _dir_crawl(root: Path,
     return result
 
 
+async def _scan_entry(root: Path, ignore_paths: List[str]) -> CrawlResult:
+    corecount = os.cpu_count() or 1
+    MODULE_LOGGER.info("Using %d cores", corecount)
+    return await _dir_crawl(
+        root,
+        ignore_paths=ignore_paths,
+        semaphore=asyncio.Semaphore(corecount)
+    )
+
+
 def scan(root: Path,
          ignore_paths: Optional[List[str]] = None) \
         -> Tuple[List[Path], List[GitRepo], List[PacmanFile]]:
@@ -110,11 +125,9 @@ def scan(root: Path,
     if not ignore_paths:
         ignore_paths = []
 
+    asyncio.set_event_loop(asyncio.new_event_loop())
     crawl_result = asyncio.run(
-        _dir_crawl(
-            root,
-            ignore_paths=ignore_paths,
-        ), debug=True
+        _scan_entry(root, ignore_paths), debug=True
     )
 
     return (
