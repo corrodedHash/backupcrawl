@@ -3,7 +3,7 @@
 import logging
 from typing import List, Tuple, Optional
 from pathlib import Path
-import fnmatch
+from fnmatch import fnmatch
 import asyncio
 import os
 from .git_check import GitSyncStatus, git_check_root, GitRepo
@@ -57,7 +57,7 @@ async def _dir_crawl(root: Path,
     async with semaphore:
         for current_file in root.iterdir():
 
-            if any(fnmatch.fnmatch(str(current_file), cur_pattern)
+            if any(fnmatch(str(current_file), cur_pattern)
                    for cur_pattern in ignore_paths):
                 continue
 
