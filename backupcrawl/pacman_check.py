@@ -59,9 +59,7 @@ async def _initialize_dict() -> Dict[str, str]:
 
     result = {
         path: package for package, path in (
-            l.split(maxsplit=1) for l in (
-                l for l in pacman_output
-                .splitlines()))}
+            l.split(maxsplit=1) for l in pacman_output.splitlines())}
     return result
 
 _FILE_DICT: Dict[str, str] = asyncio.run(_initialize_dict())

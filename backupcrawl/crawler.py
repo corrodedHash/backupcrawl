@@ -1,7 +1,7 @@
 """Contains crawling functions"""
 
 import logging
-from typing import List, Tuple, Optional
+from typing import List, Optional
 from pathlib import Path
 from fnmatch import fnmatch
 import asyncio
@@ -18,6 +18,7 @@ class CrawlResult:
     def __init__(self) -> None:
 
         self.loose_paths: List[Path] = list()
+        self.denied_paths: List[Path] = list()
         self.repo_info: List[GitRepo] = list()
         self.pacman_files: List[PacmanFile] = list()
         self.split_tree: bool = False
@@ -26,6 +27,7 @@ class CrawlResult:
         """Extend current object with another crawl result"""
         self.repo_info.extend(other.repo_info)
         self.pacman_files.extend(other.pacman_files)
+        self.denied_paths.extend(other.denied_paths)
         if other.split_tree:
             self.loose_paths.extend(other.loose_paths)
             self.split_tree = True
@@ -79,8 +81,7 @@ async def _dir_crawl(root: Path,
             try:
                 (current_file / 'hehehehe').exists()
             except PermissionError:
-                MODULE_LOGGER.warning(
-                    "No permissions for %s", str(current_file))
+                result.denied_paths.append(current_file)
                 continue
 
             if (current_file / '.git').is_dir():
@@ -122,7 +123,7 @@ async def _scan_entry(root: Path, ignore_paths: List[str]) -> CrawlResult:
 
 def scan(root: Path,
          ignore_paths: Optional[List[str]] = None) \
-        -> Tuple[List[Path], List[GitRepo], List[PacmanFile]]:
+        -> CrawlResult:
     """Scan the given path for files that are not backed up"""
     if not ignore_paths:
         ignore_paths = []
@@ -132,7 +133,4 @@ def scan(root: Path,
         _scan_entry(root, ignore_paths), debug=True
     )
 
-    return (
-        crawl_result.loose_paths,
-        crawl_result.repo_info,
-        crawl_result.pacman_files)
+    return crawl_result

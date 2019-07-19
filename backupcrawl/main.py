@@ -28,18 +28,22 @@ def crawl(path: Path) -> None:
         "/home/lukas/.vim/plugged",
     ]
 
-    sync_tree, git_repos, pacman_files = crawler.scan(
+    crawl_result = crawler.scan(
         Path(path), ignore_paths=ignore_paths)
 
-    for standard_file in sync_tree:
+    for standard_file in crawl_result.loose_paths:
         print("\t" + str(standard_file))
+
+    print("Permission denied:")
+    for denied_path in crawl_result.denied_paths:
+        print("\t" + str(denied_path))
 
     for enum_state, status_string in (
             (GitSyncStatus.DIRTY, "Dirty repositories"),
             (GitSyncStatus.AHEAD, "Unsynced repositories"),
             (GitSyncStatus.CLEAN_SYNCED, "Clean repositories")):
         print(status_string + ":")
-        for git_dir in [t.path for t in git_repos
+        for git_dir in [t.path for t in crawl_result.repo_info
                         if t.status == enum_state]:
             print("\t" + str(git_dir))
 
@@ -47,7 +51,7 @@ def crawl(path: Path) -> None:
             (PacmanSyncStatus.CHANGED, "Changed pacman files"),
             (PacmanSyncStatus.CLEAN, "Clean pacman files")):
         print(status_string + ":")
-        for pacman_file in [t for t in pacman_files
+        for pacman_file in [t for t in crawl_result.pacman_files
                             if t.status == pacman_status]:
             print("\t" + str(pacman_file.path) + " " + pacman_file.package)
 
