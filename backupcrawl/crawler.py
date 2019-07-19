@@ -6,14 +6,12 @@ from pathlib import Path
 from fnmatch import fnmatch
 import asyncio
 import os
-from .git_check import GitSyncStatus, git_check_root, GitRepo
+from .git_check import git_check_root, GitRepo
 from .pacman_check import PacmanSyncStatus, PacmanFile, is_pacman_file
 
 MODULE_LOGGER = logging.getLogger("backupcrawl.crawler")
 
 
-# This could be a dataclass, but pylint doesnt understand dataclass.field
-# right now
 class CrawlResult:
     """Result from crawl of a single directory"""
 
@@ -53,6 +51,7 @@ async def _dir_crawl(root: Path,
     result = CrawlResult()
     pacman_calls = []
     recursive_calls = []
+    git_calls = []
 
     async with semaphore:
         for current_file in root.iterdir():
@@ -84,9 +83,9 @@ async def _dir_crawl(root: Path,
                     "No permissions for %s", str(current_file))
                 continue
 
-            git_status = await git_check_root(current_file)
-            if git_status.status != GitSyncStatus.NOGIT:
-                result.repo_info.append(git_status)
+            if (current_file / '.git').is_dir():
+                git_calls.append(
+                    asyncio.create_task(git_check_root(current_file)))
                 result.split_tree = True
                 continue
 
@@ -104,6 +103,9 @@ async def _dir_crawl(root: Path,
 
     for pacman_call in pacman_calls:
         result.append_pacman(await pacman_call)
+
+    for git_call in git_calls:
+        result.repo_info.append(await git_call)
 
     return result
 

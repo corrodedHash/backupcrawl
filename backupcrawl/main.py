@@ -4,10 +4,11 @@ from pathlib import Path
 import argparse
 
 from . import crawler
-from .crawler import GitSyncStatus, PacmanSyncStatus
+from .git_check import GitSyncStatus
+from .pacman_check import PacmanSyncStatus
 
 
-def crawl(path: str) -> None:
+def crawl(path: Path) -> None:
     """Crawl given directory"""
     ignore_paths = [
         "/home/lukas/.npm",
@@ -56,10 +57,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Search for non-backed up files")
     parser.add_argument('path', type=Path, default=Path('/'))
-    parser.add_argument('-v', action='store_true')
+    parser.add_argument('--verbose', '-v', action='store_true')
     args = parser.parse_args()
     logging.basicConfig(level="WARNING")
-    logging.getLogger("backupcrawl").setLevel("DEBUG" if args.v else "WARNING")
+    logging.getLogger("backupcrawl").setLevel(
+        "DEBUG" if args.verbose else "WARNING")
+
     crawl(args.path)
 
 

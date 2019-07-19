@@ -1,6 +1,6 @@
 """Pacman check"""
 import enum
-from typing import Dict, Optional
+from typing import Dict
 from pathlib import Path
 from dataclasses import dataclass
 import logging
