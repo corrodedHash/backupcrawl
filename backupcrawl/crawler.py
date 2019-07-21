@@ -49,55 +49,54 @@ async def _dir_crawl(root: Path,
                      ) \
         -> CrawlResult:
     """Iterates depth first looking for git repositories"""
-    MODULE_LOGGER.info("Entering %s", root)
+    MODULE_LOGGER.debug("Entering %s", root)
     result = CrawlResult()
     pacman_calls = []
     recursive_calls = []
     git_calls = []
 
-    async with semaphore:
-        for current_file in root.iterdir():
+    for current_file in root.iterdir():
+        if any(fnmatch(str(current_file), cur_pattern)
+               for cur_pattern in ignore_paths):
+            continue
 
-            if any(fnmatch(str(current_file), cur_pattern)
-                   for cur_pattern in ignore_paths):
-                continue
+        if current_file.is_symlink():
+            continue
 
-            if current_file.is_symlink():
-                continue
-
-            if current_file.is_file():
-                pacman_calls.append(
-                    asyncio.create_task(
-                        is_pacman_file(
-                            current_file,
-                            semaphore)))
-                continue
-
-            if not current_file.is_dir():
-                # If path is not a directory, or a file,
-                # it is some socket or pipe. We don't care
-                continue
-
-            try:
-                (current_file / 'hehehehe').exists()
-            except PermissionError:
-                result.denied_paths.append(current_file)
-                continue
-
-            if (current_file / '.git').is_dir():
-                git_calls.append(
-                    asyncio.create_task(git_check_root(current_file)))
-                result.split_tree = True
-                continue
-
-            recursive_calls.append(
-                (asyncio.create_task(
-                    _dir_crawl(
+        if current_file.is_file():
+            pacman_calls.append(
+                asyncio.create_task(
+                    is_pacman_file(
                         current_file,
-                        ignore_paths,
-                        semaphore,
-                    )
-                ), current_file))
+                        semaphore)))
+            continue
+
+        if not current_file.is_dir():
+            # If path is not a directory, or a file,
+            # it is some socket or pipe. We don't care
+            continue
+
+        try:
+            (current_file / 'hehehehe').exists()
+        except PermissionError:
+            result.denied_paths.append(current_file)
+            continue
+
+        if (current_file / '.git').is_dir():
+            git_calls.append(
+                asyncio.create_task(
+                    git_check_root(current_file, semaphore)))
+            result.split_tree = True
+            continue
+
+        recursive_calls.append(
+            (asyncio.create_task(
+                _dir_crawl(
+                    current_file,
+                    ignore_paths,
+                    semaphore,
+                )
+            ), current_file))
 
     for recursive_call, current_file in recursive_calls:
         result.extend(await recursive_call, current_file)
@@ -130,7 +129,7 @@ def scan(root: Path,
 
     asyncio.set_event_loop(asyncio.new_event_loop())
     crawl_result = asyncio.run(
-        _scan_entry(root, ignore_paths), debug=True
+        _scan_entry(root, ignore_paths), debug=False
     )
 
     return crawl_result

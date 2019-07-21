@@ -23,15 +23,16 @@ class PacmanFile():
     package: str = ""
 
 
-async def _pacman_differs(filepath: Path) -> PacmanSyncStatus:
+async def _pacman_differs(filepath: Path, semaphore: asyncio.Semaphore) -> PacmanSyncStatus:
     """Check if a pacman controlled file is clean"""
-    pacman_process = await asyncio.create_subprocess_shell(
-        f"pacfile --check {filepath}",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL)
+    async with semaphore:
+        pacman_process = await asyncio.create_subprocess_shell(
+            f"pacfile --check {filepath}",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL)
 
-    pacman_bytes_stdout, _ = await pacman_process.communicate()
-    pacman_output = pacman_bytes_stdout.decode()
+        pacman_bytes_stdout, _ = await pacman_process.communicate()
+        pacman_output = pacman_bytes_stdout.decode()
 
     if pacman_output.startswith("no package owns"):
         raise AssertionError
@@ -70,14 +71,13 @@ async def is_pacman_file(filepath: Path, semaphore: asyncio.Semaphore) -> Pacman
 
     global _FILE_DICT
 
-    async with semaphore:
-        try:
-            pacman_pkg = _FILE_DICT[str(filepath)]
-        except KeyError:
-            return PacmanFile(path=filepath, status=PacmanSyncStatus.NOPAC)
-        MODULE_LOGGER.info("Calling pacfile command on %s", str(filepath))
+    try:
+        pacman_pkg = _FILE_DICT[str(filepath)]
+    except KeyError:
+        return PacmanFile(path=filepath, status=PacmanSyncStatus.NOPAC)
+    MODULE_LOGGER.debug("Calling pacfile command on %s", str(filepath))
 
-        return PacmanFile(
-            path=filepath,
-            status=await _pacman_differs(filepath),
-            package=pacman_pkg)
+    return PacmanFile(
+        path=filepath,
+        status=await _pacman_differs(filepath, semaphore),
+        package=pacman_pkg)

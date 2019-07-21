@@ -61,11 +61,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Search for non-backed up files")
     parser.add_argument('path', type=Path, default=Path('/'))
-    parser.add_argument('--verbose', '-v', action='store_true')
+    parser.add_argument('--verbose', '-v', action='count')
     args = parser.parse_args()
     logging.basicConfig(level="WARNING")
     logging.getLogger("backupcrawl").setLevel(
-        "DEBUG" if args.verbose else "WARNING")
+        "WARNING" if args.verbose == 0 else \
+        "INFO" if args.verbose == 1 else \
+        "DEBUG")
 
     crawl(args.path)
 
