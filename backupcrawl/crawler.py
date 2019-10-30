@@ -55,48 +55,48 @@ async def _dir_crawl(root: Path,
     recursive_calls = []
     git_calls = []
 
-    for current_file in root.iterdir():
-        if any(fnmatch(str(current_file), cur_pattern)
+    for current_path in root.iterdir():
+        if any(fnmatch(str(current_path), cur_pattern)
                for cur_pattern in ignore_paths):
             continue
 
-        if current_file.is_symlink():
+        if current_path.is_symlink():
             continue
 
-        if current_file.is_file():
+        if current_path.is_file():
             pacman_calls.append(
                 asyncio.create_task(
                     is_pacman_file(
-                        current_file,
+                        current_path,
                         semaphore)))
             continue
 
-        if not current_file.is_dir():
+        if not current_path.is_dir():
             # If path is not a directory, or a file,
             # it is some socket or pipe. We don't care
             continue
 
         try:
-            (current_file / 'hehehehe').exists()
+            (current_path / 'hehehehe').exists()
         except PermissionError:
-            result.denied_paths.append(current_file)
+            result.denied_paths.append(current_path)
             continue
 
-        if (current_file / '.git').is_dir():
+        if (current_path / '.git').is_dir():
             git_calls.append(
                 asyncio.create_task(
-                    git_check_root(current_file, semaphore)))
+                    git_check_root(current_path, semaphore)))
             result.split_tree = True
             continue
 
         recursive_calls.append(
             (asyncio.create_task(
                 _dir_crawl(
-                    current_file,
+                    current_path,
                     ignore_paths,
                     semaphore,
                 )
-            ), current_file))
+            ), current_path))
 
     for recursive_call, current_file in recursive_calls:
         result.extend(await recursive_call, current_file)

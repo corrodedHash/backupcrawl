@@ -1,7 +1,7 @@
 """Main file"""
+import argparse
 import logging
 from pathlib import Path
-import argparse
 
 from . import crawler
 from .git_check import GitSyncStatus
@@ -28,8 +28,7 @@ def crawl(path: Path) -> None:
         "/home/lukas/.vim/plugged",
     ]
 
-    crawl_result = crawler.scan(
-        Path(path), ignore_paths=ignore_paths)
+    crawl_result = crawler.scan(Path(path), ignore_paths=ignore_paths)
 
     for standard_file in crawl_result.loose_paths:
         print("\t" + str(standard_file))
@@ -41,33 +40,35 @@ def crawl(path: Path) -> None:
     for enum_state, status_string in (
             (GitSyncStatus.DIRTY, "Dirty repositories"),
             (GitSyncStatus.AHEAD, "Unsynced repositories"),
-            (GitSyncStatus.CLEAN_SYNCED, "Clean repositories")):
+            (GitSyncStatus.CLEAN_SYNCED, "Clean repositories"),
+    ):
         print(status_string + ":")
-        for git_dir in [t.path for t in crawl_result.repo_info
-                        if t.status == enum_state]:
+        for git_dir in [
+                t.path for t in crawl_result.repo_info if t.status == enum_state
+        ]:
             print("\t" + str(git_dir))
 
     for pacman_status, status_string in (
             (PacmanSyncStatus.CHANGED, "Changed pacman files"),
-            (PacmanSyncStatus.CLEAN, "Clean pacman files")):
+            (PacmanSyncStatus.CLEAN, "Clean pacman files"),
+    ):
         print(status_string + ":")
-        for pacman_file in [t for t in crawl_result.pacman_files
-                            if t.status == pacman_status]:
+        for pacman_file in [
+                t for t in crawl_result.pacman_files if t.status == pacman_status
+        ]:
             print("\t" + str(pacman_file.path) + " " + pacman_file.package)
 
 
 def main() -> None:
     """Main function"""
-    parser = argparse.ArgumentParser(
-        description="Search for non-backed up files")
-    parser.add_argument('path', type=Path, default=Path('/'))
-    parser.add_argument('--verbose', '-v', action='count')
+    parser = argparse.ArgumentParser(description="Search for non-backed up files")
+    parser.add_argument("path", type=Path, default=Path("/"))
+    parser.add_argument("--verbose", "-v", action="count", default=0)
     args = parser.parse_args()
     logging.basicConfig(level="WARNING")
     logging.getLogger("backupcrawl").setLevel(
-        "WARNING" if args.verbose == 0 else \
-        "INFO" if args.verbose == 1 else \
-        "DEBUG")
+        "WARNING" if args.verbose == 0 else "INFO" if args.verbose == 1 else "DEBUG"
+    )
 
     crawl(args.path)
 
