@@ -76,9 +76,8 @@ async def _dir_crawl(root: Path,
             # it is some socket or pipe. We don't care
             continue
 
-        try:
-            (current_path / 'hehehehe').exists()
-        except PermissionError:
+
+        if not os.access(current_path, os.R_OK | os.X_OK):
             result.denied_paths.append(current_path)
             continue
 
