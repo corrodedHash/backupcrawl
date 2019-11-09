@@ -29,12 +29,13 @@ class PacmanFile:
 def _pacman_differs(filepath: Path) -> PacmanSyncStatus:
     """Check if a pacman controlled file is clean"""
     pacman_process = subprocess.run(
-        ["pacfile", f"--check {filepath}"], text=True, capture_output=True
+        ["pacfile", "--check", f"{filepath}"], text=True, capture_output=True
     )
 
-    if pacman_process.stdout.startswith("no package owns"):
-        raise AssertionError
+    print(pacman_process.stderr)
+    assert pacman_process.returncode == 0
 
+    assert not pacman_process.stdout.startswith("no package owns")
     assert pacman_process.stdout.startswith("file:")
 
     for pacman_line in pacman_process.stdout.splitlines():

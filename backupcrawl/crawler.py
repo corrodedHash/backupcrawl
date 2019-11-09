@@ -75,6 +75,9 @@ def _dir_crawl(root: Path, ignore_paths: List[str]) -> CrawlResult:
             continue
 
         if current_path.is_file():
+            if not os.access(current_path, os.R_OK):
+                result.denied_paths.append(current_path)
+                continue
             found_files.append(current_path)
             continue
 
