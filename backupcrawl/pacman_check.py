@@ -1,45 +1,43 @@
 """Pacman check"""
 import enum
-from typing import Dict
-from pathlib import Path
-from dataclasses import dataclass
 import logging
-import asyncio
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict
+
 MODULE_LOGGER = logging.getLogger("backupcrawl.pacman_check")
 
 
 class PacmanSyncStatus(enum.Enum):
     """Different sync states for a pacman controlled file"""
+
     NOPAC = enum.auto()
     CHANGED = enum.auto()
     CLEAN = enum.auto()
 
 
 @dataclass
-class PacmanFile():
+class PacmanFile:
     """An entry for a file managed by pacman"""
+
     path: Path
     status: PacmanSyncStatus
     package: str = ""
 
 
-async def _pacman_differs(filepath: Path, semaphore: asyncio.Semaphore) -> PacmanSyncStatus:
+def _pacman_differs(filepath: Path) -> PacmanSyncStatus:
     """Check if a pacman controlled file is clean"""
-    async with semaphore:
-        pacman_process = await asyncio.create_subprocess_shell(
-            f"pacfile --check {filepath}",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL)
+    pacman_process = subprocess.run(
+        ["pacfile", f"--check {filepath}"], text=True, capture_output=True
+    )
 
-        pacman_bytes_stdout, _ = await pacman_process.communicate()
-        pacman_output = pacman_bytes_stdout.decode()
-
-    if pacman_output.startswith("no package owns"):
+    if pacman_process.stdout.startswith("no package owns"):
         raise AssertionError
 
-    assert pacman_output.startswith("file:")
+    assert pacman_process.stdout.startswith("file:")
 
-    for pacman_line in pacman_output.splitlines():
+    for pacman_line in pacman_process.stdout.splitlines():
         if pacman_line.startswith("sha256:"):
             if pacman_line.endswith("on filesystem)"):
                 return PacmanSyncStatus.CHANGED
@@ -50,23 +48,22 @@ async def _pacman_differs(filepath: Path, semaphore: asyncio.Semaphore) -> Pacma
     return PacmanSyncStatus.CLEAN
 
 
-async def _initialize_dict() -> Dict[str, str]:
-    pacman_process = await asyncio.create_subprocess_shell(
-        "pacman -Ql",
-        stdout=asyncio.subprocess.PIPE)
-
-    pacman_bytes_stdout, _ = await pacman_process.communicate()
-    pacman_output = pacman_bytes_stdout.decode()
+def _initialize_dict() -> Dict[str, str]:
+    pacman_process = subprocess.run(["pacman", "-Ql"], capture_output=True, text=True)
 
     result = {
-        path: package for package, path in (
-            l.split(maxsplit=1) for l in pacman_output.splitlines())}
+        path: package
+        for package, path in (
+            l.split(maxsplit=1) for l in pacman_process.stdout.splitlines()
+        )
+    }
     return result
 
-_FILE_DICT: Dict[str, str] = asyncio.run(_initialize_dict())
+
+_FILE_DICT: Dict[str, str] = _initialize_dict()
 
 
-async def is_pacman_file(filepath: Path, semaphore: asyncio.Semaphore) -> PacmanFile:
+def is_pacman_file(filepath: Path) -> PacmanFile:
     """Checks if a single file is managed by pacman, returns the package"""
 
     global _FILE_DICT
@@ -78,6 +75,5 @@ async def is_pacman_file(filepath: Path, semaphore: asyncio.Semaphore) -> Pacman
     MODULE_LOGGER.debug("Calling pacfile command on %s", str(filepath))
 
     return PacmanFile(
-        path=filepath,
-        status=await _pacman_differs(filepath, semaphore),
-        package=pacman_pkg)
+        path=filepath, status=_pacman_differs(filepath), package=pacman_pkg
+    )

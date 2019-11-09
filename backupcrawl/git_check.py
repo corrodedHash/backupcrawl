@@ -1,14 +1,16 @@
 """Git check"""
 import enum
-from pathlib import Path
 import logging
-import asyncio
+import subprocess
 from dataclasses import dataclass
-MODULE_LOGGER = logging.getLogger('backupcrawl.git_check')
+from pathlib import Path
+
+MODULE_LOGGER = logging.getLogger("backupcrawl.git_check")
 
 
 class GitSyncStatus(enum.Enum):
     """Different backup states a git repository can be in"""
+
     NOGIT = enum.auto()
     CLEAN_SYNCED = enum.auto()
     DIRTY = enum.auto()
@@ -16,53 +18,46 @@ class GitSyncStatus(enum.Enum):
 
 
 @dataclass
-class GitRepo():
+class GitRepo:
     """An entry for the backup scan"""
+
     path: Path
     status: GitSyncStatus = GitSyncStatus.NOGIT
 
 
-async def _git_check_ahead(path: Path, semaphore: asyncio.Semaphore) -> bool:
+def _git_check_ahead(path: Path) -> bool:
     """Checks if a git repository got a branch that
     is ahead of the remote branch"""
 
-    async with semaphore:
-        git_process = await asyncio.create_subprocess_shell(
-            "git for-each-ref --format='%(upstream:trackshort)' refs/heads",
-            cwd=path,
-            stdout=asyncio.subprocess.PIPE)
-
-        git_bytes_stdout, _ = await git_process.communicate()
+    git_process = subprocess.run(
+        ["git", "for-each-ref", "--format='%(upstream:trackshort)'", "refs/heads"],
+        cwd=path,
+        capture_output=True,
+    )
 
     if git_process.returncode != 0:
         raise RuntimeError
 
-    return any(x in (b"'>'", b"'<>'", b"''")
-               for x in git_bytes_stdout.splitlines())
+    return any(x in (b"'>'", b"'<>'", b"''") for x in git_process.stdout.splitlines())
 
 
-async def git_check_root(path: Path, semaphore: asyncio.Semaphore) -> GitRepo:
+def git_check_root(path: Path) -> GitRepo:
     """Checks if a git repository is clean"""
-    if not (path / '.git').is_dir():
+    if not (path / ".git").is_dir():
         return GitRepo(path=path, status=GitSyncStatus.NOGIT)
 
-    async with semaphore:
-        git_process = await asyncio.create_subprocess_shell(
-            "git status --porcelain",
-            cwd=path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL)
-
-        git_bytes_stdout, _ = await git_process.communicate()
+    git_process = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=path, capture_output=True
+    )
 
     MODULE_LOGGER.debug("Calling git shell command at %s", str(path))
 
     assert git_process.returncode == 0
 
-    if git_bytes_stdout != b"":
+    if git_process.stdout != b"":
         return GitRepo(path=path, status=GitSyncStatus.DIRTY)
 
-    if await _git_check_ahead(path, semaphore):
+    if _git_check_ahead(path):
         return GitRepo(path=path, status=GitSyncStatus.AHEAD)
 
     return GitRepo(path=path, status=GitSyncStatus.CLEAN_SYNCED)
