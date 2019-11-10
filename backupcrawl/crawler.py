@@ -4,12 +4,14 @@ import asyncio
 import logging
 import multiprocessing
 import os
+from collections import defaultdict
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import List, Optional
+from typing import DefaultDict, List, Map, Optional
 
-from .git_check import GitRepo, git_check_root
-from .pacman_check import PacmanFile, PacmanSyncStatus, is_pacman_file
+from .git_check import GitBackupEntry, git_check_root
+from .pacman_check import PacmanBackupEntry, is_pacman_file
+from .sync_status import BackupEntry, SyncStatus
 
 MODULE_LOGGER = logging.getLogger("backupcrawl.crawler")
 
@@ -21,15 +23,19 @@ class CrawlResult:
 
         self.loose_paths: List[Path] = list()
         self.denied_paths: List[Path] = list()
-        self.repo_info: List[GitRepo] = list()
-        self.pacman_files: List[PacmanFile] = list()
+        self.backups: Map[type, List[BackupEntry]] = list()
         self.split_tree: bool = False
         self.path: Path
 
     def extend(self, other: "CrawlResult") -> None:
         """Extend current object with another crawl result"""
-        self.repo_info.extend(other.repo_info)
-        self.pacman_files.extend(other.pacman_files)
+
+        for backup_type in other.backups:
+            try:
+                self.backups[backup_type].extend(other.backups[backup_type])
+            except KeyError:
+                self.backups[backup_type] = other.backups[backup_type]
+
         self.denied_paths.extend(other.denied_paths)
         if other.split_tree:
             self.loose_paths.extend(other.loose_paths)
@@ -37,20 +43,12 @@ class CrawlResult:
         elif other.loose_paths:
             self.loose_paths.append(other.path)
 
-    def append_pacman(self, status: PacmanFile) -> None:
-        """Append a pacman file to the crawl result"""
-        if status.status == PacmanSyncStatus.NOPAC:
-            self.loose_paths.append(status.path)
-            return
-        self.pacman_files.append(status)
-        self.split_tree = True
 
-
-def _check_file(path: Path) -> PacmanFile:
+def _check_file(path: Path) -> BackupEntry:
     return is_pacman_file(path)
 
 
-def _check_directory(path: Path) -> GitRepo:
+def _check_directory(path: Path) -> BackupEntry:
     return git_check_root(path)
 
 
@@ -97,10 +95,17 @@ def _dir_crawl(root: Path, ignore_paths: List[str]) -> CrawlResult:
         recurse_dirs.append(current_path)
 
     for vcs_file in found_files:
-        result.append_pacman(_check_file(vcs_file))
+        backup_result = _check_file(vcs_file)
+        if backup_result.status == SyncStatus.NONE:
+            result.loose_paths.append(backup_result.path)
+        else:
+            result.backups[type(backup_result)].append( 
+                backup_result
+            )
 
     for vcs_dirs in found_directories:
-        result.repo_info.append(_check_directory(vcs_dirs))
+        backup_result = _check_directory(vcs_dirs)
+        result.backups[type(backup_result)].append(backup_result)
 
     for recurse_dir in recurse_dirs:
         result.extend(_dir_crawl(recurse_dir, ignore_paths))

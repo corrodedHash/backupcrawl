@@ -1,28 +1,17 @@
 """Git check"""
-import enum
 import logging
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
+
+from .sync_status import BackupEntry, SyncStatus
 
 MODULE_LOGGER = logging.getLogger("backupcrawl.git_check")
 
 
-class GitSyncStatus(enum.Enum):
-    """Different backup states a git repository can be in"""
-
-    NOGIT = enum.auto()
-    CLEAN_SYNCED = enum.auto()
-    DIRTY = enum.auto()
-    AHEAD = enum.auto()
-
-
-@dataclass
-class GitRepo:
+class GitBackupEntry(BackupEntry):  # pylint: disable=R0903
     """An entry for the backup scan"""
 
-    path: Path
-    status: GitSyncStatus = GitSyncStatus.NOGIT
+    BackupName = "Git"
 
 
 def _git_check_ahead(path: Path) -> bool:
@@ -41,10 +30,10 @@ def _git_check_ahead(path: Path) -> bool:
     return any(x in (b"'>'", b"'<>'", b"''") for x in git_process.stdout.splitlines())
 
 
-def git_check_root(path: Path) -> GitRepo:
+def git_check_root(path: Path) -> GitBackupEntry:
     """Checks if a git repository is clean"""
     if not (path / ".git").is_dir():
-        return GitRepo(path=path, status=GitSyncStatus.NOGIT)
+        return GitBackupEntry(path=path, status=SyncStatus.NONE)
 
     git_process = subprocess.run(
         ["git", "status", "--porcelain"], cwd=path, capture_output=True
@@ -55,9 +44,9 @@ def git_check_root(path: Path) -> GitRepo:
     assert git_process.returncode == 0
 
     if git_process.stdout != b"":
-        return GitRepo(path=path, status=GitSyncStatus.DIRTY)
+        return GitBackupEntry(path=path, status=SyncStatus.DIRTY)
 
     if _git_check_ahead(path):
-        return GitRepo(path=path, status=GitSyncStatus.AHEAD)
+        return GitBackupEntry(path=path, status=SyncStatus.AHEAD)
 
-    return GitRepo(path=path, status=GitSyncStatus.CLEAN_SYNCED)
+    return GitBackupEntry(path=path, status=SyncStatus.CLEAN)

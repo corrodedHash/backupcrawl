@@ -4,8 +4,7 @@ import logging
 from pathlib import Path
 
 from . import crawler
-from .git_check import GitSyncStatus
-from .pacman_check import PacmanSyncStatus
+from .git_check import SyncStatus
 
 
 def crawl(path: Path) -> None:
