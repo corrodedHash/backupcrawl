@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 from . import crawler
-from .git_check import SyncStatus
+from .sync_status import SyncStatus
 
 
 def crawl(path: Path) -> None:
@@ -36,27 +36,17 @@ def crawl(path: Path) -> None:
     for denied_path in crawl_result.denied_paths:
         print("\t" + str(denied_path))
 
-    for enum_state, status_string in (
-            (GitSyncStatus.DIRTY, "Dirty repositories"),
-            (GitSyncStatus.AHEAD, "Unsynced repositories"),
-            (GitSyncStatus.CLEAN_SYNCED, "Clean repositories"),
-    ):
-        print(status_string + ":")
-        for git_dir in [
-                t.path for t in crawl_result.repo_info if t.status == enum_state
-        ]:
-            print("\t" + str(git_dir))
-
-    for pacman_status, status_string in (
-            (PacmanSyncStatus.CHANGED, "Changed pacman files"),
-            (PacmanSyncStatus.CLEAN, "Clean pacman files"),
-    ):
-        print(status_string + ":")
-        for pacman_file in [
-                t for t in crawl_result.pacman_files if t.status == pacman_status
-        ]:
-            print("\t" + str(pacman_file.path) + " " + pacman_file.package)
-
+    for backup_type in crawl_result.backups:
+        for enum_state, status_string in (
+                (SyncStatus.DIRTY, "Dirty"),
+                (SyncStatus.AHEAD, "Unsynced"),
+                (SyncStatus.CLEAN, "Clean"),
+        ):
+            print(f"{backup_type} {status_string}:")
+            for git_dir in [
+                    t.path for t in crawl_result.backups[backup_type] if t.status == enum_state
+            ]:
+                print("\t" + str(git_dir))
 
 def main() -> None:
     """Main function"""
