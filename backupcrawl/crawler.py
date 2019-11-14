@@ -1,6 +1,5 @@
 """Contains crawling functions"""
 
-import asyncio
 import logging
 import os
 from collections import defaultdict
@@ -27,6 +26,7 @@ class CrawlResult:
         self.path: Path
 
     def add_backup(self, backup: BackupEntry)-> None:
+        """Add backup entry to result"""
         self.backups[type(backup)].append(backup)
 
     def extend(self, other: "CrawlResult") -> None:
@@ -102,7 +102,10 @@ def _dir_crawl(root: Path, ignore_paths: List[str]) -> CrawlResult:
 
     for vcs_dirs in found_directories:
         backup_result = _check_directory(vcs_dirs)
-        result.backups[type(backup_result)].append(backup_result)
+        if backup_result.status == SyncStatus.NONE:
+            recurse_dirs.append(backup_result.path)
+        else:
+            result.add_backup(backup_result)
 
     for recurse_dir in recurse_dirs:
         result.extend(_dir_crawl(recurse_dir, ignore_paths))
@@ -115,7 +118,6 @@ def scan(root: Path, ignore_paths: Optional[List[str]] = None) -> CrawlResult:
     if not ignore_paths:
         ignore_paths = []
 
-    asyncio.set_event_loop(asyncio.new_event_loop())
     crawl_result = _dir_crawl(root, ignore_paths)
 
     return crawl_result
