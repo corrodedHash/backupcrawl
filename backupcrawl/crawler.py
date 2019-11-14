@@ -22,7 +22,6 @@ class CrawlResult:
         self.loose_paths: List[Path] = list()
         self.denied_paths: List[Path] = list()
         self.backups: DefaultDict[type, List[BackupEntry]] = defaultdict(list)
-        self.split_tree: bool = False
         self.path: Path
 
     def add_backup(self, backup: BackupEntry)-> None:
@@ -36,9 +35,8 @@ class CrawlResult:
             self.backups[backup_type].extend(other.backups[backup_type])
 
         self.denied_paths.extend(other.denied_paths)
-        if other.split_tree:
+        if other.backups:
             self.loose_paths.extend(other.loose_paths)
-            self.split_tree = True
         elif other.loose_paths:
             self.loose_paths.append(other.path)
 
@@ -61,7 +59,6 @@ def _dir_crawl(root: Path, ignore_paths: List[str]) -> CrawlResult:
     result = CrawlResult()
     result.path = root
     found_files = []
-    found_directories = []
     recurse_dirs = []
 
     for current_path in root.iterdir():
@@ -87,8 +84,9 @@ def _dir_crawl(root: Path, ignore_paths: List[str]) -> CrawlResult:
             result.denied_paths.append(current_path)
             continue
 
-        if _contains_vcs(current_path):
-            found_directories.append(current_path)
+        backup_result = _check_directory(current_path)
+        if backup_result.status != SyncStatus.NONE:
+            result.add_backup(backup_result)
             continue
 
         recurse_dirs.append(current_path)
@@ -97,13 +95,6 @@ def _dir_crawl(root: Path, ignore_paths: List[str]) -> CrawlResult:
         backup_result = _check_file(vcs_file)
         if backup_result.status == SyncStatus.NONE:
             result.loose_paths.append(backup_result.path)
-        else:
-            result.add_backup(backup_result)
-
-    for vcs_dirs in found_directories:
-        backup_result = _check_directory(vcs_dirs)
-        if backup_result.status == SyncStatus.NONE:
-            recurse_dirs.append(backup_result.path)
         else:
             result.add_backup(backup_result)
 
