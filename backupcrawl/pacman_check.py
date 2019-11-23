@@ -29,10 +29,12 @@ class PacmanFile:
 def _pacman_differs(filepath: Path) -> PacmanSyncStatus:
     """Check if a pacman controlled file is clean"""
     pacman_process = subprocess.run(
-        ["pacfile", "--check", f"{filepath}"], text=True, capture_output=True
+        ["pacfile", "--check", f"{filepath}"],
+        text=True,
+        capture_output=True,
+        check=True,
     )
 
-    print(pacman_process.stderr)
     assert pacman_process.returncode == 0
 
     assert not pacman_process.stdout.startswith("no package owns")
@@ -50,7 +52,9 @@ def _pacman_differs(filepath: Path) -> PacmanSyncStatus:
 
 
 def _initialize_dict() -> Dict[str, str]:
-    pacman_process = subprocess.run(["pacman", "-Ql"], capture_output=True, text=True)
+    pacman_process = subprocess.run(
+        ["pacman", "-Ql"], capture_output=True, text=True, check=True
+    )
 
     result = {
         path: package
@@ -61,16 +65,11 @@ def _initialize_dict() -> Dict[str, str]:
     return result
 
 
-_FILE_DICT: Dict[str, str] = _initialize_dict()
-
-
 def is_pacman_file(filepath: Path) -> PacmanFile:
     """Checks if a single file is managed by pacman, returns the package"""
 
-    global _FILE_DICT
-
     try:
-        pacman_pkg = _FILE_DICT[str(filepath)]
+        pacman_pkg = is_pacman_file.file_dict[str(filepath)]
     except KeyError:
         return PacmanFile(path=filepath, status=PacmanSyncStatus.NOPAC)
     MODULE_LOGGER.debug("Calling pacfile command on %s", str(filepath))
@@ -78,3 +77,6 @@ def is_pacman_file(filepath: Path) -> PacmanFile:
     return PacmanFile(
         path=filepath, status=_pacman_differs(filepath), package=pacman_pkg
     )
+
+
+is_pacman_file.file_dict: Dict[str, str] = _initialize_dict()

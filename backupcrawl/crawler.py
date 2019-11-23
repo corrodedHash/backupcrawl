@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import multiprocessing
 import os
 from fnmatch import fnmatch
 from pathlib import Path
