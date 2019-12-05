@@ -22,6 +22,7 @@ def _git_check_ahead(path: Path) -> bool:
         ["git", "for-each-ref", "--format='%(upstream:trackshort)'", "refs/heads"],
         cwd=path,
         capture_output=True,
+        check=True,
     )
 
     if git_process.returncode != 0:
@@ -36,7 +37,7 @@ def git_check_root(path: Path) -> GitBackupEntry:
         return GitBackupEntry(path=path, status=SyncStatus.NONE)
 
     git_process = subprocess.run(
-        ["git", "status", "--porcelain"], cwd=path, capture_output=True
+        ["git", "status", "--porcelain"], cwd=path, capture_output=True, check=True
     )
 
     MODULE_LOGGER.debug("Calling git shell command at %s", str(path))

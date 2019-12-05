@@ -11,7 +11,7 @@ MODULE_LOGGER = logging.getLogger("backupcrawl.pacman_check")
 
 
 @dataclass
-class PacmanBackupEntry(BackupEntry): # pylint: disable=R0903
+class PacmanBackupEntry(BackupEntry):  # pylint: disable=R0903
     """An entry for a file managed by pacman"""
 
     package: str = ""
@@ -20,7 +20,10 @@ class PacmanBackupEntry(BackupEntry): # pylint: disable=R0903
 def _pacman_differs(filepath: Path) -> SyncStatus:
     """Check if a pacman controlled file is clean"""
     pacman_process = subprocess.run(
-        ["pacfile", "--check", f"{filepath}"], text=True, capture_output=True
+        ["pacfile", "--check", f"{filepath}"],
+        text=True,
+        capture_output=True,
+        check=True,
     )
 
     assert pacman_process.returncode == 0
@@ -39,7 +42,7 @@ def _pacman_differs(filepath: Path) -> SyncStatus:
 
 
 def _initialize_dict() -> Dict[str, str]:
-    pacman_process = subprocess.run(["pacman", "-Ql"], capture_output=True, text=True)
+    pacman_process = subprocess.run(["pacman", "-Ql"], capture_output=True, text=True, check=True)
 
     result = {
         path: package
