@@ -12,7 +12,7 @@ from .crawlresult import CrawlResult
 MODULE_LOGGER = logging.getLogger("backupcrawl.main")
 
 
-def printCrawlResult(crawl_result: CrawlResult, verbose: bool = False) -> None:
+def _print_crawl_result(crawl_result: CrawlResult, verbose: bool = False) -> None:
     """Prints result of crawl"""
     for standard_file in crawl_result.loose_paths:
         print("\t" + str(standard_file))
@@ -39,7 +39,7 @@ def printCrawlResult(crawl_result: CrawlResult, verbose: bool = False) -> None:
                 print("\t" + str(git_dir))
 
 
-def parseRC(path: Optional[Path] = None) -> Dict[str, str]:
+def _parse_rc(path: Optional[Path] = None) -> Dict[str, str]:
     """Parses config file"""
     if path is None:
         path = Path.home() / ".config" / "backupcrawlrc.json"
@@ -64,9 +64,9 @@ def main() -> None:
     logging.getLogger("backupcrawl").setLevel(
         "WARNING" if args.debug == 0 else "INFO" if args.debug == 1 else "DEBUG"
     )
-    config = parseRC(args.rcfile)
+    config = _parse_rc(args.rcfile)
     crawl_result = crawler.scan(args.path, ignore_paths=config.get("ignore_paths", []))
-    printCrawlResult(crawl_result, verbose=args.verbose > 0)
+    _print_crawl_result(crawl_result, verbose=args.verbose > 0)
 
 
 if __name__ == "__main__":
