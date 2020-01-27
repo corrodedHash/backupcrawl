@@ -1,0 +1,16 @@
+{
+    "ignore_paths": [
+        "/home/lukas/.aurget_build",
+        "/home/lukas/.cache",
+        "/home/lukas/.cargo",
+        "/home/lukas/.ccache",
+        "/home/lukas/.clangd",
+        "/home/lukas/.mypy_cache",
+        "/home/lukas/.npm",
+        "/home/lukas/.rustup",
+        "/home/lukas/.vim/bundle",
+        "/home/lukas/.vim/plugged",
+        "/home/lukas/.vim/spell",
+        "/home/lukas/.zcompdump-*"
+    ]
+}

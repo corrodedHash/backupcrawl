@@ -2,43 +2,16 @@
 
 import logging
 import os
-from collections import defaultdict
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import DefaultDict, List, Optional
+from typing import  List, Optional
+from .crawlresult import CrawlResult
 
 from .git_check import git_check_root
 from .pacman_check import is_pacman_file
 from .sync_status import BackupEntry, SyncStatus
 
 MODULE_LOGGER = logging.getLogger("backupcrawl.crawler")
-
-
-class CrawlResult:
-    """Result from crawl of a single directory"""
-
-    def __init__(self) -> None:
-
-        self.loose_paths: List[Path] = list()
-        self.denied_paths: List[Path] = list()
-        self.backups: DefaultDict[type, List[BackupEntry]] = defaultdict(list)
-        self.path: Path
-
-    def add_backup(self, backup: BackupEntry)-> None:
-        """Add backup entry to result"""
-        self.backups[type(backup)].append(backup)
-
-    def extend(self, other: "CrawlResult") -> None:
-        """Extend current object with another crawl result"""
-
-        for backup_type in other.backups:
-            self.backups[backup_type].extend(other.backups[backup_type])
-
-        self.denied_paths.extend(other.denied_paths)
-        if other.backups:
-            self.loose_paths.extend(other.loose_paths)
-        elif other.loose_paths:
-            self.loose_paths.append(other.path)
 
 
 def _check_file(path: Path) -> BackupEntry:
