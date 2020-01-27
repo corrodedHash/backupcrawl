@@ -58,6 +58,7 @@ def main() -> None:
     parser.add_argument("--debug", "-d", action="count", default=0)
     parser.add_argument("--rcfile", type=Path)
     parser.add_argument("--verbose", "-v", action="count", default=0)
+    parser.add_argument("--progress", "-p", action="store_true")
     args = parser.parse_args()
 
     logging.basicConfig(level="WARNING")
@@ -65,7 +66,9 @@ def main() -> None:
         "WARNING" if args.debug == 0 else "INFO" if args.debug == 1 else "DEBUG"
     )
     config = _parse_rc(args.rcfile)
-    crawl_result = crawler.scan(args.path, ignore_paths=config.get("ignore_paths", []))
+    crawl_result = crawler.scan(
+        args.path, ignore_paths=config.get("ignore_paths", []), progress=args.progress
+    )
     _print_crawl_result(crawl_result, verbose=args.verbose > 0)
 
 

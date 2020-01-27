@@ -1,10 +1,10 @@
 """Contains StatusTracker class"""
 from pathlib import Path
-from typing import List
+from typing import List, Union
 import time
 
 
-class StatusTracker:
+class TimingStatusTracker:
     """Trackes status of crawling"""
 
     def __init__(self, root: Path):
@@ -39,3 +39,22 @@ class StatusTracker:
             f"{self.last_status_time - self.start_time:>7.2f} "
             f"{self.close_count:>6} / {self.open_count:>6}"
         )
+
+
+class VoidStatusTracker:
+    """Provides tracker interface, outputs nothing"""
+
+    def __init__(self, path: Path):
+        pass
+
+    def open_paths(self, paths: List[Path]) -> None:
+        pass
+
+    def close_path(self, path: Path) -> None:
+        pass
+
+    def print_status(self) -> None:
+        pass
+
+
+StatusTracker = Union[TimingStatusTracker, VoidStatusTracker]
