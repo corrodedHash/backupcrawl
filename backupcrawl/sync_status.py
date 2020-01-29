@@ -19,4 +19,3 @@ class BackupEntry:
 
     path: Path
     status: SyncStatus
-    BackupName = "Base backup, you fucked up"

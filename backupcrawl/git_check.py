@@ -11,8 +11,6 @@ MODULE_LOGGER = logging.getLogger("backupcrawl.git_check")
 class GitBackupEntry(BackupEntry):  # pylint: disable=R0903
     """An entry for the backup scan"""
 
-    BackupName = "Git"
-
 
 def _git_check_ahead(path: Path) -> bool:
     """Checks if a git repository got a branch that
