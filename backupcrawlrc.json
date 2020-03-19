@@ -59,6 +59,8 @@
     "/home/lukas/.zcompdump-*",
     "/home/lukas/.zotero",
     "/home/lukas/.zsh_history",
-    "/home/lukas/Zotero"
+    "/home/lukas/Zotero",
+    "/home/lukas/go",
+    "/home/lukas/documents/zotero"
   ]
 }
