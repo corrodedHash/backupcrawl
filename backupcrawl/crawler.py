@@ -34,7 +34,7 @@ def _dir_crawl(
     recurse_dirs = []
 
     for current_path in root.iterdir():
-        if any(fnmatch(str(current_path), cur_pattern) for cur_pattern in ignore_paths):
+        if any(fnmatch(str(current_path), os.path.expanduser(cur_pattern)) for cur_pattern in ignore_paths):
             continue
 
         if current_path.is_symlink():
