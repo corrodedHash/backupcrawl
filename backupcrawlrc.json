@@ -26,7 +26,6 @@
     "~/.lesshst",
     "~/.local",
     "~/.mozilla",
-    "~/.mypy_cache",
     "~/.NERDTreeBookmarks",
     "~/.npm",
     "~/.nv",
@@ -64,7 +63,16 @@
     "~/go",
     "~/documents/zotero",
 
-    "/etc/*.pacnew",
-    "/etc/*.pacsave"
+    "*.pacnew",
+    "*.pacsave",
+
+    "/etc/fstab",
+    "/etc/hosts",
+    "/etc/shells",
+    "/etc/group",
+    "/etc/passwd",
+
+    "/etc/gshadow*",
+    "/etc/shadow*"
   ]
 }
