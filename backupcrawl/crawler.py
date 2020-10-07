@@ -34,7 +34,10 @@ def _dir_crawl(
     recurse_dirs = []
 
     for current_path in root.iterdir():
-        if any(fnmatch(str(current_path), os.path.expanduser(cur_pattern)) for cur_pattern in ignore_paths):
+        if any(
+            fnmatch(str(current_path), os.path.expanduser(cur_pattern))
+            for cur_pattern in ignore_paths
+        ):
             continue
 
         if current_path.is_symlink():
@@ -88,10 +91,9 @@ def scan(
     if not ignore_paths:
         ignore_paths = []
 
-    if progress:
-        status = TimingStatusTracker(root)
-    else:
-        status = VoidStatusTracker(root)
+    status: StatusTracker = (
+        TimingStatusTracker(root) if progress else VoidStatusTracker(root)
+    )
 
     crawl_result = _dir_crawl(root, ignore_paths, status)
 
