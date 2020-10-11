@@ -3,7 +3,8 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Any, Optional, Dict
+import typing
 
 from . import crawler
 from .sync_status import SyncStatus
@@ -26,7 +27,7 @@ def _print_crawl_result(crawl_result: CrawlResult, verbose: bool = False) -> Non
         (SyncStatus.AHEAD, "Unsynced"),
     ]
     if verbose:
-        desired_sync_states.insert((SyncStatus.CLEAN, "Clean"))
+        desired_sync_states.append((SyncStatus.CLEAN, "Clean"))
 
     for backup_type in crawl_result.backups:
         for enum_state, status_string in desired_sync_states:
@@ -39,7 +40,7 @@ def _print_crawl_result(crawl_result: CrawlResult, verbose: bool = False) -> Non
                 print("\t" + str(git_dir))
 
 
-def _parse_rc(path: Optional[Path] = None) -> Dict[str, str]:
+def _parse_rc(path: Optional[Path] = None) -> Dict[str, Any]:
     """Parses config file"""
     if path is None:
         path = Path.home() / ".config" / "backupcrawlrc.json"
@@ -47,7 +48,7 @@ def _parse_rc(path: Optional[Path] = None) -> Dict[str, str]:
         MODULE_LOGGER.warning("rcfile %s does not exist", path)
         return {}
     with open(path, "r") as rcfile:
-        options = json.load(rcfile)
+        options = typing.cast(Dict[str, Any], json.load(rcfile))
     return options
 
 
