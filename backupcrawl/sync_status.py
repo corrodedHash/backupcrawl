@@ -19,3 +19,13 @@ class BackupEntry:
 
     path: Path
     status: SyncStatus
+
+
+class DirChecker:
+    def check_dir(self, path: Path) -> BackupEntry:
+        raise NotImplemented
+
+
+class FileChecker:
+    def check_file(self, path: Path) -> BackupEntry:
+        raise NotImplemented

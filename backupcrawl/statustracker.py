@@ -14,7 +14,7 @@ class TimingStatusTracker:
         self.start_time = time.time()
         self.last_status_time = self.start_time
         self.last_close_time = self.start_time
-        self.max_close_duration = 0
+        self.max_close_duration = 0.0
 
     def open_paths(self, paths: List[Path]) -> None:
         """Event to open paths"""
