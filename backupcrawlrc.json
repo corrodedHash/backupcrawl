@@ -1,7 +1,15 @@
 {
   "ignore_paths": [
     "*.mypy_cache",
-
+    "*.pacnew",
+    "*.pacsave",
+    "/etc/fstab",
+    "/etc/group",
+    "/etc/gshadow*",
+    "/etc/hosts",
+    "/etc/passwd",
+    "/etc/shadow*",
+    "/etc/shells",
     "~/.anydesk",
     "~/.audacity-data",
     "~/.aurget_build",
@@ -57,22 +65,11 @@
     "~/.xdvirc",
     "~/.yarnrc",
     "~/.zcompdump-*",
+    "~/.zoom",
     "~/.zotero",
     "~/.zsh_history",
-    "~/Zotero",
-    "~/go",
     "~/documents/zotero",
-
-    "*.pacnew",
-    "*.pacsave",
-
-    "/etc/fstab",
-    "/etc/hosts",
-    "/etc/shells",
-    "/etc/group",
-    "/etc/passwd",
-
-    "/etc/gshadow*",
-    "/etc/shadow*"
+    "~/go",
+    "~/Zotero"
   ]
 }
