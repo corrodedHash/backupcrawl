@@ -2,7 +2,7 @@
 import logging
 import subprocess
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
 import itertools
 from .sync_status import SyncStatus, BackupEntry, FileChecker
@@ -19,11 +19,14 @@ class PacmanBackupEntry(BackupEntry):  # pylint: disable=R0903
 
 class PacmanFileChecker(FileChecker):
     def __init__(self) -> None:
-        self._file_dict: Dict[str, str] = self._get_pacman_dict()
-        self._dirty_file_dict: Dict[str, str] = self._get_dirty_pacman_dict()
+        self._file_dict: Optional[Dict[str, str]] = None
+        self._dirty_file_dict: Optional[Dict[str, str]] = None
 
     def _pacman_differs(self, filepath: Path) -> SyncStatus:
         """Check if a pacman controlled file is clean"""
+        if self._dirty_file_dict is None:
+            MODULE_LOGGER.debug("Initializing dirty pacman files")
+            self._dirty_file_dict = self._get_dirty_pacman_dict()
         if str(filepath) in self._dirty_file_dict:
             return SyncStatus.DIRTY
         return SyncStatus.CLEAN
@@ -78,7 +81,8 @@ class PacmanFileChecker(FileChecker):
 
     def check_file(self, filepath: Path) -> PacmanBackupEntry:
         """Checks if a single file is managed by pacman, returns the package"""
-
+        if self._file_dict is None:
+            self._file_dict = self._get_pacman_dict()
         try:
             pacman_pkg = self._file_dict[str(filepath)]
         except KeyError:
