@@ -21,6 +21,7 @@
     "~/.ccache",
     "~/.clangd",
     "~/.config/nvim",
+    "~/.config/rua/pkg",
     "~/.debug",
     "~/.docker",
     "~/.dotnet",
