@@ -25,6 +25,7 @@
     "~/.debug",
     "~/.docker",
     "~/.dotnet",
+    "~/.electrum",
     "~/.esd_auth",
     "~/.espressif",
     "~/.gem",
