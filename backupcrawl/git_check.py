@@ -3,7 +3,7 @@ import logging
 import subprocess
 from pathlib import Path
 
-from .sync_status import BackupEntry, SyncStatus, DirChecker
+from .sync_status import BackupEntry, DirChecker, SyncStatus
 
 MODULE_LOGGER = logging.getLogger("backupcrawl.git_check")
 
@@ -27,7 +27,7 @@ class GitDirChecker(DirChecker):
         )
 
         if git_process.returncode != 0:
-            raise RuntimeError
+            raise RuntimeError()
 
         return any(
             x in (b"'>'", b"'<>'", b"''") for x in git_process.stdout.splitlines()

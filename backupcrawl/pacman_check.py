@@ -1,11 +1,11 @@
 """Pacman check"""
+import itertools
 import logging
 import subprocess
-from pathlib import Path
-from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
-import itertools
-from .sync_status import SyncStatus, BackupEntry, FileChecker
+from pathlib import Path
+
+from .sync_status import BackupEntry, FileChecker, SyncStatus
 
 MODULE_LOGGER = logging.getLogger("backupcrawl.pacman_check")
 
@@ -19,9 +19,10 @@ class PacmanBackupEntry(BackupEntry):  # pylint: disable=R0903
 
 class PacmanFileChecker(FileChecker):
     """Check if given path is installed with pacman"""
+
     def __init__(self) -> None:
-        self._file_dict: Optional[Dict[str, str]] = None
-        self._dirty_file_dict: Optional[Dict[str, str]] = None
+        self._file_dict: dict[str, str] | None = None
+        self._dirty_file_dict: dict[str, str] | None = None
 
     def _pacman_differs(self, filepath: Path) -> SyncStatus:
         """Check if a pacman controlled file is clean"""
@@ -32,7 +33,7 @@ class PacmanFileChecker(FileChecker):
             return SyncStatus.DIRTY
         return SyncStatus.CLEAN
 
-    def _get_pacman_dict(self) -> Dict[str, str]:
+    def _get_pacman_dict(self) -> dict[str, str]:
         pacman_process = subprocess.run(
             ["pacman", "-Ql"], capture_output=True, text=True, check=True
         )
@@ -45,7 +46,7 @@ class PacmanFileChecker(FileChecker):
         }
         return result
 
-    def _get_dirty_pacman_dict(self) -> Dict[str, str]:
+    def _get_dirty_pacman_dict(self) -> dict[str, str]:
         pacman_process = subprocess.run(
             ["pacman", "-Qkk"], capture_output=True, text=True, check=True
         )
@@ -57,7 +58,7 @@ class PacmanFileChecker(FileChecker):
             if line.startswith("warning:") or line.startswith("backup file:")
         )
 
-        def _parse_line(line: str) -> Tuple[str, str]:
+        def _parse_line(line: str) -> tuple[str, str]:
             _, package, colon_rest = line.split(":", maxsplit=2)
             package = package.strip()
             path, reason = colon_rest.split("(", maxsplit=1)

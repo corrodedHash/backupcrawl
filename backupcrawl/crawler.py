@@ -4,18 +4,18 @@ import logging
 import os
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import List, Optional, Tuple
-from .crawlresult import CrawlResult
 
+from .crawlresult import CrawlResult
 from .git_check import GitDirChecker
 from .pacman_check import PacmanFileChecker
+from .statustracker import (StatusTracker, TimingStatusTracker,
+                            VoidStatusTracker)
 from .sync_status import BackupEntry, DirChecker, FileChecker, SyncStatus
-from .statustracker import StatusTracker, VoidStatusTracker, TimingStatusTracker
 
 MODULE_LOGGER = logging.getLogger("backupcrawl.crawler")
 
 
-def _check_file(path: Path, file_checks: List[FileChecker]) -> BackupEntry:
+def _check_file(path: Path, file_checks: list[FileChecker]) -> BackupEntry:
     for check in file_checks:
         status = check.check_file(path)
         if status.status != SyncStatus.NONE:
@@ -23,7 +23,7 @@ def _check_file(path: Path, file_checks: List[FileChecker]) -> BackupEntry:
     return BackupEntry(path, SyncStatus.NONE)
 
 
-def _check_directory(path: Path, dir_checks: List[DirChecker]) -> BackupEntry:
+def _check_directory(path: Path, dir_checks: list[DirChecker]) -> BackupEntry:
     for check in dir_checks:
         status = check.check_dir(path)
         if status.status != SyncStatus.NONE:
@@ -33,9 +33,9 @@ def _check_directory(path: Path, dir_checks: List[DirChecker]) -> BackupEntry:
 
 def _dir_crawl(
     root: Path,
-    ignore_paths: List[str],
+    ignore_paths: list[str],
     status: StatusTracker,
-    checks: Tuple[List[DirChecker], List[FileChecker]],
+    checks: tuple[list[DirChecker], list[FileChecker]],
 ) -> CrawlResult:
     """Iterates depth first looking for git repositories"""
     MODULE_LOGGER.debug("Entering %s", root)
@@ -96,7 +96,7 @@ def _dir_crawl(
 
 
 def scan(
-    root: Path, ignore_paths: Optional[List[str]] = None, progress: bool = False
+    root: Path, ignore_paths: list[str] | None = None, progress: bool = False
 ) -> CrawlResult:
     """Scan the given path for files that are not backed up"""
     if not ignore_paths:

@@ -12,8 +12,8 @@ class CrawlResult:
     """Result from crawl of a single directory"""
 
     def __init__(self) -> None:
-        self.loose_paths: List[Path] = list()
-        self.denied_paths: List[Path] = list()
+        self.loose_paths: List[Path] = []
+        self.denied_paths: List[Path] = []
         self.backups: DefaultDict[type, List[BackupEntry]] = defaultdict(list)
         self.path: Path
 

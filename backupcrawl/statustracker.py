@@ -18,6 +18,7 @@ class TimingStatusTracker:
     def open_paths(self, paths: list[Path]) -> None:
         """Event to open paths"""
         self.open_count += len(paths)
+        self._print_status()
 
     def close_path(self, path: Path) -> None:
         """Event to close path"""
@@ -28,11 +29,12 @@ class TimingStatusTracker:
             self.max_close_duration = close_time
             print(f"{close_time:>7.2f}: {path}")
         self.last_close_time = current_time
-        if current_time - self.last_status_time > 2:
-            self._print_status()
+        self._print_status()
 
     def _print_status(self) -> None:
         """Prints current status"""
+        if time.time() - self.last_status_time < 2:
+            return
         self.last_status_time = time.time()
         print(
             f"{self.last_status_time - self.start_time:>7.2f} "
