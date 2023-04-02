@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "backupcrawl"
 version = "0.0.1"
-description = "Detect files which are not backup up"
+description = "Detect files which are not backed up"
 authors = ["Lukas Wölfer"]
 license = "MIT"
 readme = "README.md"
@@ -17,11 +17,8 @@ classifiers = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.5 || ^3.6 || ^3.7 || ^3.8"
-
-[tool.poetry.scripts]
-backupcrawl = 'backupcrawl.__main__:main'
+python = "^3.10"
 
 [build-system]
-requires = ["poetry>=0.12"]
-build-backend = "poetry.masonry.api"
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

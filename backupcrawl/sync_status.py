@@ -22,10 +22,16 @@ class BackupEntry:
 
 
 class DirChecker:
+    """Abstract base class for checking the backup status of a directory"""
+
     def check_dir(self, path: Path) -> BackupEntry:
-        raise NotImplemented
+        """Check if directory is backed up"""
+        raise NotImplementedError()
 
 
 class FileChecker:
-    def check_file(self, path: Path) -> BackupEntry:
-        raise NotImplemented
+    """Abstract base class for checking the backup status of a file"""
+
+    def check_file(self, filepath: Path) -> BackupEntry:
+        """Check if file is backed up"""
+        raise NotImplementedError()

@@ -18,6 +18,7 @@ class PacmanBackupEntry(BackupEntry):  # pylint: disable=R0903
 
 
 class PacmanFileChecker(FileChecker):
+    """Check if given path is installed with pacman"""
     def __init__(self) -> None:
         self._file_dict: Optional[Dict[str, str]] = None
         self._dirty_file_dict: Optional[Dict[str, str]] = None
@@ -46,7 +47,7 @@ class PacmanFileChecker(FileChecker):
 
     def _get_dirty_pacman_dict(self) -> Dict[str, str]:
         pacman_process = subprocess.run(
-            ["pacman", "-Qkk"], capture_output=True, text=True
+            ["pacman", "-Qkk"], capture_output=True, text=True, check=True
         )
         lines = (
             line

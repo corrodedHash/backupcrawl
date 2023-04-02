@@ -13,6 +13,8 @@ class GitBackupEntry(BackupEntry):  # pylint: disable=R0903
 
 
 class GitDirChecker(DirChecker):
+    """Check if directory is a git repository"""
+
     def _git_check_ahead(self, path: Path) -> bool:
         """Checks if a git repository got a branch that
         is ahead of the remote branch"""
@@ -27,8 +29,9 @@ class GitDirChecker(DirChecker):
         if git_process.returncode != 0:
             raise RuntimeError
 
-        return any(x in (b"'>'", b"'<>'", b"''") for x in git_process.stdout.splitlines())
-
+        return any(
+            x in (b"'>'", b"'<>'", b"''") for x in git_process.stdout.splitlines()
+        )
 
     def check_dir(self, path: Path) -> GitBackupEntry:
         """Checks if a git repository is clean"""

@@ -41,8 +41,8 @@ def _dir_crawl(
     MODULE_LOGGER.debug("Entering %s", root)
     result = CrawlResult()
     result.path = root
-    found_files = []
-    recurse_dirs = []
+    found_files: list[Path] = []
+    recurse_dirs: list[Path] = []
 
     for current_path in root.iterdir():
         if any(

@@ -1,6 +1,5 @@
 """Contains StatusTracker class"""
 from pathlib import Path
-from typing import List, Union
 import time
 
 
@@ -16,23 +15,23 @@ class TimingStatusTracker:
         self.last_close_time = self.start_time
         self.max_close_duration = 0.0
 
-    def open_paths(self, paths: List[Path]) -> None:
+    def open_paths(self, paths: list[Path]) -> None:
         """Event to open paths"""
         self.open_count += len(paths)
 
     def close_path(self, path: Path) -> None:
         """Event to close path"""
         self.close_count += 1
-        enter_time = time.time()
-        close_time = enter_time - self.last_close_time
+        current_time = time.time()
+        close_time = current_time - self.last_close_time
         if close_time > self.max_close_duration:
             self.max_close_duration = close_time
             print(f"{close_time:>7.2f}: {path}")
-        self.last_close_time = enter_time
-        if enter_time - self.last_status_time > 2:
-            self.print_status()
+        self.last_close_time = current_time
+        if current_time - self.last_status_time > 2:
+            self._print_status()
 
-    def print_status(self) -> None:
+    def _print_status(self) -> None:
         """Prints current status"""
         self.last_status_time = time.time()
         print(
@@ -47,14 +46,11 @@ class VoidStatusTracker:
     def __init__(self, path: Path):
         pass
 
-    def open_paths(self, paths: List[Path]) -> None:
-        pass
+    def open_paths(self, paths: list[Path]) -> None:
+        """Event to open paths"""
 
     def close_path(self, path: Path) -> None:
-        pass
-
-    def print_status(self) -> None:
-        pass
+        """Prints current status"""
 
 
-StatusTracker = Union[TimingStatusTracker, VoidStatusTracker]
+StatusTracker = TimingStatusTracker | VoidStatusTracker
