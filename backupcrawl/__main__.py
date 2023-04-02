@@ -45,7 +45,7 @@ def _parse_rc(path: Path) -> dict[str, Any]:
     if not path.exists():
         MODULE_LOGGER.warning("rcfile %s does not exist", path)
         return {}
-    with open(path, "r", encoding='utf-8') as rcfile:
+    with open(path, "r", encoding="utf-8") as rcfile:
         options = typing.cast(dict[str, Any], json.load(rcfile))
     return options
 
