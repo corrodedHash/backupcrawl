@@ -16,6 +16,9 @@ classifiers = [
     "Topic :: System :: Archiving :: Backup",
 ]
 
+[tool.poetry.scripts]
+backupcrawl = 'backupcrawl.__main__:main'
+
 [tool.poetry.dependencies]
 python = "^3.10"
 
