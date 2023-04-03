@@ -28,6 +28,7 @@ class PacmanFileChecker(FileChecker):
     def __init__(self) -> None:
         self._file_dict: dict[str, str] | None = None
         self._dirty_file_dict: dict[str, str] | None = None
+        self.unknown_reasons: list[str] = []
 
     def _pacman_differs(self, filepath: Path) -> SyncStatus:
         """Check if a pacman controlled file is clean"""
@@ -78,8 +79,13 @@ class PacmanFileChecker(FileChecker):
                 "Symlink path mismatch",
                 "File type mismatch",
             ]
-            if reason.strip(")") not in reasons:
-                MODULE_LOGGER.warning("Unknown reason '%s'", reason.strip(")"))
+            stripped_reason = reason.strip(")")
+            if (
+                stripped_reason not in reasons
+                and stripped_reason not in self.unknown_reasons
+            ):
+                self.unknown_reasons.append(stripped_reason)
+                MODULE_LOGGER.warning("Unknown reason '%s'", stripped_reason)
             return (package, path)
 
         parsed_lines = (_parse_line(line) for line in lines)

@@ -1,11 +1,12 @@
 """Contains StatusTracker class"""
-from pathlib import Path
 import time
+from pathlib import Path
 
 import rich.console
 import rich.live
 import rich.markup
 import rich.text
+from typing_extensions import Self
 
 
 class TimingStatusTracker:
@@ -20,6 +21,13 @@ class TimingStatusTracker:
         self.start_time = time.time()
         self.last_status_time = self.start_time
         self.last_opened: str | None = None
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, exc_type: None, exc_val: None, exc_tb: None) -> None:
+        """Notify the status tracker, that crawling has stopped"""
+        self.live_display.__exit__(*([None] * 3))
 
     def open_paths(self, paths: list[Path]) -> None:
         """Event to open paths"""
@@ -58,10 +66,6 @@ class TimingStatusTracker:
             refresh=True,
         )
 
-    def stop(self) -> None:
-        """Notify the status tracker, that crawling has stopped"""
-        self.live_display.__exit__(*([None] * 3))
-
 
 class VoidStatusTracker:
     """Provides tracker interface, outputs nothing"""
@@ -75,7 +79,10 @@ class VoidStatusTracker:
     def close_path(self, path: Path) -> None:
         """Prints current status"""
 
-    def stop(self) -> None:
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, exc_type: None, exc_val: None, exc_tb: None) -> None:
         """Notify the status tracker, that crawling has stopped"""
 
 

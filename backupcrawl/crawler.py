@@ -103,10 +103,12 @@ def scan(
         ignore_paths = []
     if status is None:
         status = VoidStatusTracker(root)
-
-    crawl_result = _dir_crawl(
-        root, ignore_paths, status, ([GitDirChecker()], [PacmanFileChecker()])
-    )
-    status.stop()
+    with status as entered_status:
+        crawl_result = _dir_crawl(
+            root,
+            ignore_paths,
+            entered_status,
+            ([GitDirChecker()], [PacmanFileChecker()]),
+        )
 
     return crawl_result

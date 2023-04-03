@@ -47,13 +47,20 @@ class GitDirChecker(DirChecker):
         if not (path / ".git").is_dir():
             return GitBackupEntry(path=path, status=SyncStatus.NONE)
 
-        git_process = subprocess.run(
-            ["git", "status", "--porcelain"], cwd=path, capture_output=True, check=True
-        )
-
         MODULE_LOGGER.debug("Calling git shell command at %s", str(path))
-
-        assert git_process.returncode == 0
+        try:
+            git_process = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=path,
+                capture_output=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError as return_code_error:
+            MODULE_LOGGER.warning(
+                "`git status --porcelain` returned with error code %s",
+                return_code_error,
+            )
+            return GitBackupEntry(path=path, status=SyncStatus.NONE)
 
         if git_process.stdout != b"":
             return GitBackupEntry(path=path, status=SyncStatus.DIRTY)
