@@ -53,7 +53,7 @@ class PacmanFileChecker(FileChecker):
 
     def _get_dirty_pacman_dict(self) -> dict[str, str]:
         pacman_process = subprocess.run(
-            ["pacman", "-Qkk"], capture_output=True, text=True, check=True
+            ["pacman", "-Qkk"], capture_output=True, text=True, check=False
         )
         lines = (
             line

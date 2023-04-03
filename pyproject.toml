@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "backupcrawl"
-version = "0.1.0"
+version = "0.2.0"
 description = "Detect files which are not backed up"
 authors = ["Lukas Wölfer"]
 license = "MIT"
