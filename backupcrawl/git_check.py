@@ -11,6 +11,11 @@ MODULE_LOGGER = logging.getLogger("backupcrawl.git_check")
 class GitBackupEntry(BackupEntry):  # pylint: disable=R0903
     """An entry for the backup scan"""
 
+    @staticmethod
+    def name() -> str:
+        """Display name of the backup entry type"""
+        return "Git"
+
 
 class GitDirChecker(DirChecker):
     """Check if directory is a git repository"""
@@ -32,6 +37,10 @@ class GitDirChecker(DirChecker):
         return any(
             x in (b"'>'", b"'<>'", b"''") for x in git_process.stdout.splitlines()
         )
+
+    @staticmethod
+    def name() -> str:
+        return "Git"
 
     def check_dir(self, path: Path) -> GitBackupEntry:
         """Checks if a git repository is clean"""

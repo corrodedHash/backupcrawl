@@ -16,6 +16,11 @@ class PacmanBackupEntry(BackupEntry):  # pylint: disable=R0903
 
     package: str = ""
 
+    @staticmethod
+    def name() -> str:
+        """Display name of the backup entry type"""
+        return "Pacman"
+
 
 class PacmanFileChecker(FileChecker):
     """Check if given path is installed with pacman"""

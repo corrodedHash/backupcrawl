@@ -13,7 +13,7 @@ from .crawlresult import CrawlResult
 MODULE_LOGGER = logging.getLogger("backupcrawl.main")
 
 
-def _print_crawl_result(crawl_result: CrawlResult, verbose: bool = False) -> None:
+def _print_crawl_result(crawl_result: CrawlResult, show_clean: bool = False) -> None:
     """Prints result of crawl"""
     for standard_file in crawl_result.loose_paths:
         print("\t" + str(standard_file))
@@ -26,12 +26,12 @@ def _print_crawl_result(crawl_result: CrawlResult, verbose: bool = False) -> Non
         (SyncStatus.DIRTY, "Dirty"),
         (SyncStatus.AHEAD, "Unsynced"),
     ]
-    if verbose:
+    if show_clean:
         desired_sync_states.append((SyncStatus.CLEAN, "Clean"))
 
     for backup_type in crawl_result.backups:
         for enum_state, status_string in desired_sync_states:
-            print(f"{backup_type} {status_string}:")
+            print(f"{backup_type.name()} {status_string}:")
             for git_dir in [
                 t.path
                 for t in crawl_result.backups[backup_type]
@@ -54,18 +54,23 @@ def main() -> None:
     """Main function"""
     parser = argparse.ArgumentParser(description="Search for non-backed up files")
     parser.add_argument("path", type=Path, default=Path("/"))
-    parser.add_argument("--debug", "-d", action="count", default=0)
+    parser.add_argument("--verbose", "-v", action="count", default=0)
     parser.add_argument(
         "--rcfile", type=Path, default=Path.home() / ".config" / "backupcrawlrc.json"
     )
-    parser.add_argument("--verbose", "-v", action="count", default=0)
+    parser.add_argument(
+        "--all",
+        "-a",
+        action="store_true",
+        help="Show all file paths, also backed up ones",
+    )
     parser.add_argument("--progress", "-p", action="store_true")
     parser.add_argument("--ignore", "-i", action="append", default=[])
     args = parser.parse_args()
 
     logging.basicConfig(level="WARNING")
     logging.getLogger("backupcrawl").setLevel(
-        "WARNING" if args.debug == 0 else "INFO" if args.debug == 1 else "DEBUG"
+        "WARNING" if args.verbose == 0 else "INFO" if args.verbose == 1 else "DEBUG"
     )
     config = _parse_rc(args.rcfile)
     crawl_result = crawler.scan(
@@ -73,7 +78,7 @@ def main() -> None:
         ignore_paths=config.get("ignore_paths", []) + args.ignore,
         progress=args.progress,
     )
-    _print_crawl_result(crawl_result, verbose=args.verbose > 0)
+    _print_crawl_result(crawl_result, show_clean=args.all)
 
 
 if __name__ == "__main__":
