@@ -8,7 +8,7 @@ from pathlib import Path
 from .crawlresult import CrawlResult
 from .git_check import GitDirChecker
 from .pacman_check import PacmanFileChecker
-from .statustracker import StatusTracker, TimingStatusTracker, VoidStatusTracker
+from .statustracker import StatusTracker, VoidStatusTracker
 from .sync_status import BackupEntry, DirChecker, FileChecker, SyncStatus
 
 MODULE_LOGGER = logging.getLogger("backupcrawl.crawler")
@@ -94,18 +94,19 @@ def _dir_crawl(
 
 
 def scan(
-    root: Path, ignore_paths: list[str] | None = None, progress: bool = False
+    root: Path,
+    ignore_paths: list[str] | None = None,
+    status: StatusTracker | None = None,
 ) -> CrawlResult:
     """Scan the given path for files that are not backed up"""
-    if not ignore_paths:
+    if ignore_paths is None:
         ignore_paths = []
-
-    status: StatusTracker = (
-        TimingStatusTracker(root) if progress else VoidStatusTracker(root)
-    )
+    if status is None:
+        status = VoidStatusTracker(root)
 
     crawl_result = _dir_crawl(
         root, ignore_paths, status, ([GitDirChecker()], [PacmanFileChecker()])
     )
+    status.stop()
 
     return crawl_result

@@ -21,6 +21,7 @@ backupcrawl = 'backupcrawl.__main__:main'
 
 [tool.poetry.dependencies]
 python = "^3.10"
+rich = "^13.3.3"
 
 [tool.poetry.group.dev.dependencies]
 black = "^23.3.0"

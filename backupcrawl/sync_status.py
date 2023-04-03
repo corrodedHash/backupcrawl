@@ -30,12 +30,6 @@ class BackupEntry:
 class DirChecker(abc.ABC):
     """Abstract base class for checking the backup status of a directory"""
 
-    @staticmethod
-    @abc.abstractmethod
-    def name() -> str:
-        """Returns the display name of the dir checker"""
-        raise NotImplementedError()
-
     @abc.abstractmethod
     def check_dir(self, path: Path) -> BackupEntry:
         """Check if directory is backed up"""

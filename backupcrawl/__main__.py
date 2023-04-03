@@ -2,42 +2,20 @@
 import argparse
 import json
 import logging
+import typing
 from pathlib import Path
 from typing import Any
-import typing
 
+import rich.console
+
+from backupcrawl.printer import ResultPrinter
+from backupcrawl.statustracker import TimingStatusTracker
 from . import crawler
-from .sync_status import SyncStatus
-from .crawlresult import CrawlResult
 
 MODULE_LOGGER = logging.getLogger("backupcrawl.main")
 
 
-def _print_crawl_result(crawl_result: CrawlResult, show_clean: bool = False) -> None:
-    """Prints result of crawl"""
-    for standard_file in crawl_result.loose_paths:
-        print("\t" + str(standard_file))
-
-    print("Permission denied:")
-    for denied_path in crawl_result.denied_paths:
-        print("\t" + str(denied_path))
-
-    desired_sync_states: list[tuple[SyncStatus, str]] = [
-        (SyncStatus.DIRTY, "Dirty"),
-        (SyncStatus.AHEAD, "Unsynced"),
-    ]
-    if show_clean:
-        desired_sync_states.append((SyncStatus.CLEAN, "Clean"))
-
-    for backup_type in crawl_result.backups:
-        for enum_state, status_string in desired_sync_states:
-            print(f"{backup_type.name()} {status_string}:")
-            for git_dir in [
-                t.path
-                for t in crawl_result.backups[backup_type]
-                if t.status == enum_state
-            ]:
-                print("\t" + str(git_dir))
+console = rich.console.Console()
 
 
 def _parse_rc(path: Path) -> dict[str, Any]:
@@ -76,9 +54,10 @@ def main() -> None:
     crawl_result = crawler.scan(
         args.path,
         ignore_paths=config.get("ignore_paths", []) + args.ignore,
-        progress=args.progress,
+        status=(TimingStatusTracker(args.path, console) if args.progress else None),
     )
-    _print_crawl_result(crawl_result, show_clean=args.all)
+
+    ResultPrinter(console).print(crawl_result, show_clean=args.all)
 
 
 if __name__ == "__main__":

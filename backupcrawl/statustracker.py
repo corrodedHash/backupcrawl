@@ -2,44 +2,65 @@
 from pathlib import Path
 import time
 
+import rich.console
+import rich.live
+import rich.markup
+import rich.text
+
 
 class TimingStatusTracker:
     """Trackes status of crawling"""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, console: rich.console.Console):
+        self.live_display = rich.live.Live(None, console=console)
+        self.live_display.__enter__()
         self.root = root
         self.open_count = 0
         self.close_count = 0
         self.start_time = time.time()
         self.last_status_time = self.start_time
-        self.last_close_time = self.start_time
-        self.max_close_duration = 0.0
+        self.last_opened: str | None = None
 
     def open_paths(self, paths: list[Path]) -> None:
         """Event to open paths"""
         self.open_count += len(paths)
+        if paths:
+            self.last_opened = str(paths[-1])
         self._print_status()
 
-    def close_path(self, path: Path) -> None:
+    def close_path(self, _path: Path) -> None:
         """Event to close path"""
         self.close_count += 1
-        current_time = time.time()
-        close_time = current_time - self.last_close_time
-        if close_time > self.max_close_duration:
-            self.max_close_duration = close_time
-            print(f"{close_time:>7.2f}: {path}")
-        self.last_close_time = current_time
         self._print_status()
+
+    @property
+    def runtime(self) -> float:
+        """Returns the time the tracker has been running"""
+        return self.last_status_time - self.start_time
 
     def _print_status(self) -> None:
         """Prints current status"""
-        if time.time() - self.last_status_time < 2:
+        if time.time() - self.last_status_time < 0.1:
             return
         self.last_status_time = time.time()
-        print(
-            f"{self.last_status_time - self.start_time:>7.2f} "
-            f"{self.close_count:>6} / {self.open_count:>6}"
+
+        status_text = rich.text.Text()
+        status_text.append(f"{self.runtime:>7.2f}", style="bold")
+        status_text.append(" ")
+        status_text.append(f"{self.open_count - self.close_count:>4}", style="#ADD8E6")
+        status_text.append(" + ")
+        status_text.append(f"{self.close_count:>6}", style="#808080")
+        status_text.append("\n\t")
+        status_text.append(rich.markup.escape(str(self.last_opened)))
+
+        self.live_display.update(
+            status_text,
+            refresh=True,
         )
+
+    def stop(self) -> None:
+        """Notify the status tracker, that crawling has stopped"""
+        self.live_display.__exit__(*([None] * 3))
 
 
 class VoidStatusTracker:
@@ -53,6 +74,9 @@ class VoidStatusTracker:
 
     def close_path(self, path: Path) -> None:
         """Prints current status"""
+
+    def stop(self) -> None:
+        """Notify the status tracker, that crawling has stopped"""
 
 
 StatusTracker = TimingStatusTracker | VoidStatusTracker
