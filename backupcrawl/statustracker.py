@@ -13,21 +13,70 @@ import rich.progress_bar
 from typing_extensions import Self
 
 
+class Stopwatch:
+    """Class to track time"""
+
+    def __init__(self) -> None:
+        self.start_time = time.time()
+        self.last_lap_time = self.start_time
+
+    @property
+    def total_time(self) -> float:
+        """Total time since the stopwatch started"""
+        return time.time() - self.start_time
+
+    @property
+    def lap_time(self) -> float:
+        """Time since the last time `lap` was called"""
+        return time.time() - self.last_lap_time
+
+    def lap(self) -> None:
+        """Start new lap"""
+        self.last_lap_time = time.time()
+
+
+class PathTracker:
+    """Keep track of information about which paths have been checked and are still being checked"""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.open_count = 0
+        self.close_count = 0
+
+        self.last_opened: str | None = None
+        self.opened_first_level: list[Path] = []
+        self.closed_first_level: list[Path] = []
+
+    def open_paths(self, paths: list[Path]) -> None:
+        """Event to open paths"""
+        self.open_count += len(paths)
+        if paths:
+            self.last_opened = str(paths[-1])
+            if len(paths[-1].relative_to(self.root).parents) == 1:
+                self.opened_first_level += paths
+
+    def close_path(self, path: Path) -> None:
+        """Event to close path"""
+        self.close_count += 1
+        if len(path.relative_to(self.root).parents) == 1:
+            self.closed_first_level.append(path)
+
+    @property
+    def open_delta(self) -> int:
+        """Amount of paths that are currently being processed"""
+        return self.open_count - self.close_count
+
+
 class TimingStatusTracker(AbstractContextManager["TimingStatusTracker"]):
-    """Trackes status of crawli ng"""
+    """Trackes status of crawling"""
 
     def __init__(self, root: Path, console: rich.console.Console):
         self.live_display = rich.live.Live(None, console=console)
         self.live_display.start()
         self.root = root
-        self.open_count = 0
-        self.close_count = 0
-        self.start_time = time.time()
-        self.last_status_time = self.start_time
-        self.last_opened: str | None = None
+        self.status_update_ticker = Stopwatch()
 
-        self.opened_first_level: list[Path] = []
-        self.closed_first_level: list[Path] = []
+        self.path_tracker = PathTracker(root)
 
     def __enter__(self) -> Self:
         return self
@@ -44,36 +93,31 @@ class TimingStatusTracker(AbstractContextManager["TimingStatusTracker"]):
 
     def open_paths(self, paths: list[Path]) -> None:
         """Event to open paths"""
-        self.open_count += len(paths)
-        if paths:
-            self.last_opened = str(paths[-1])
-            if len(paths[-1].relative_to(self.root).parents) == 1:
-                self.opened_first_level += paths
+        self.path_tracker.open_paths(paths)
         self._maybe_update()
 
     def close_path(self, path: Path) -> None:
         """Event to close path"""
-        self.close_count += 1
-        if len(path.relative_to(self.root).parents) == 1:
-            self.closed_first_level.append(path)
+        self.path_tracker.close_path(path)
         self._maybe_update()
-
-    @property
-    def runtime(self) -> float:
-        """Returns the time the tracker has been running"""
-        return self.last_status_time - self.start_time
 
     def _print_status(self) -> None:
         status_text = rich.text.Text()
-        status_text.append(f"{self.runtime:>7.2f}", style="bold")
+        status_text.append(
+            f"{self.status_update_ticker.total_time:>7.2f}", style="bold"
+        )
         status_text.append(" ")
-        status_text.append(f"{self.open_count - self.close_count:>4}", style="#ADD8E6")
+        status_text.append(f"{self.path_tracker.open_delta:>4}", style="#ADD8E6")
         status_text.append(" + ")
-        status_text.append(f"{self.close_count:>6}", style="#808080")
-        current_path = rich.text.Text(rich.markup.escape(str(self.last_opened)))
+        status_text.append(f"{self.path_tracker.close_count:>6}", style="#808080")
+        current_path = rich.text.Text(
+            rich.markup.escape(str(self.path_tracker.last_opened))
+        )
 
         progress_bar = rich.progress_bar.ProgressBar(
-            len(self.opened_first_level), len(self.closed_first_level), width=30
+            len(self.path_tracker.opened_first_level),
+            len(self.path_tracker.closed_first_level),
+            width=30,
         )
 
         self.live_display.update(
@@ -87,9 +131,9 @@ class TimingStatusTracker(AbstractContextManager["TimingStatusTracker"]):
 
     def _maybe_update(self) -> None:
         """Prints current status"""
-        if time.time() - self.last_status_time < 0.1:
+        if self.status_update_ticker.lap_time < 0.1:
             return
-        self.last_status_time = time.time()
+        self.status_update_ticker.lap()
         self._print_status()
 
 
