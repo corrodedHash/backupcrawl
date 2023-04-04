@@ -71,7 +71,7 @@ class TimingStatusTracker(AbstractContextManager["TimingStatusTracker"]):
     """Trackes status of crawling"""
 
     def __init__(self, root: Path, console: rich.console.Console):
-        self.live_display = rich.live.Live(None, console=console)
+        self.live_display = rich.live.Live(None, console=console, transient=True)
         self.live_display.start()
         self.root = root
         self.status_update_ticker = Stopwatch()
@@ -88,6 +88,7 @@ class TimingStatusTracker(AbstractContextManager["TimingStatusTracker"]):
         exc_tb: None | TracebackType,
     ) -> None:
         """Notify the status tracker, that crawling has stopped"""
+        self.path_tracker.last_opened = None
         self._print_status()
         self.live_display.stop()
 
@@ -124,7 +125,7 @@ class TimingStatusTracker(AbstractContextManager["TimingStatusTracker"]):
             rich.console.Group(
                 progress_bar,
                 status_text,
-                current_path,
+                *([current_path] if self.path_tracker.last_opened is not None else []),
             ),
             refresh=True,
         )
