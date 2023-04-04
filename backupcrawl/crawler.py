@@ -11,6 +11,7 @@ from .pacman_check import PacmanFileChecker
 from .statustracker import StatusTracker, VoidStatusTracker
 from .sync_status import BackupEntry, DirChecker, FileChecker, SyncStatus
 
+
 MODULE_LOGGER = logging.getLogger("backupcrawl.crawler")
 
 

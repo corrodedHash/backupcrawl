@@ -5,9 +5,52 @@ import rich.box
 import rich.console
 import rich.panel
 import rich.style
+import rich.columns
 
 from backupcrawl.crawlresult import CrawlResult
-from backupcrawl.sync_status import SyncStatus
+from backupcrawl.sync_status import BackupEntry, SyncStatus
+
+
+class SyncPanel(rich.panel.Panel):
+    """Panel summarizing a subset of backup entries"""
+
+    def __init__(self, name: str, entries: list[BackupEntry], show_clean: bool) -> None:
+        self._status_string_map = {
+            SyncStatus.DIRTY: "Dirty",
+            SyncStatus.AHEAD: "Unsynced",
+            SyncStatus.CLEAN: "Clean",
+        }
+        self._border_style_map = {
+            SyncStatus.DIRTY: rich.style.Style(color="dark_red"),
+            SyncStatus.AHEAD: rich.style.Style(color="pale_violet_red1"),
+            SyncStatus.CLEAN: rich.style.Style(color="green"),
+        }
+        desired_sync_states = [SyncStatus.DIRTY, SyncStatus.AHEAD]
+
+        if show_clean:
+            desired_sync_states.append(SyncStatus.CLEAN)
+
+        filtered_entries = {
+            enum_state: [t for t in entries if t.status == enum_state]
+            for enum_state in desired_sync_states
+        }
+
+        filtered_states = [x for x in desired_sync_states if filtered_entries[x]]
+
+        result_panels = [
+            rich.panel.Panel(
+                "\n".join([str(x.path) for x in filtered_entries[enum_state]]),
+                border_style=self._border_style_map[enum_state],
+                title=self._status_string_map[enum_state],
+                title_align="left",
+            )
+            for enum_state in filtered_states
+        ]
+        super().__init__(
+            rich.console.Group(*result_panels),
+            title=name,
+            title_align="left",
+        )
 
 
 class ResultPrinter:
@@ -20,56 +63,29 @@ class ResultPrinter:
         """Prints result of crawl"""
 
         loose_paths = rich.panel.Panel.fit(
-            "\n".join([str(x) for x in crawl_result.loose_paths])
+            "\n".join([str(x) for x in crawl_result.loose_paths]),
+            title="Not backed up",
+            title_align="left",
         )
-        loose_paths.title = "Not backed up"
-        loose_paths.title_align = "left"
 
         denied_paths = rich.panel.Panel.fit(
-            "\n".join([str(x) for x in crawl_result.denied_paths])
+            "\n".join([str(x) for x in crawl_result.denied_paths]),
+            title="Permission denied",
+            title_align="left",
         )
-        denied_paths.title = "Permission denied"
-        denied_paths.title_align = "left"
 
-        output: list[Any] = [loose_paths]
+        output: list[Any] = []
+        if crawl_result.loose_paths:
+            output.append(loose_paths)
         if crawl_result.denied_paths:
             output.append(denied_paths)
-        output.append(self._get_sync_panels(crawl_result, show_clean))
-        self.console.print(*output)
-
-    def _get_sync_panels(
-        self, crawl_result: CrawlResult, show_clean: bool
-    ) -> rich.console.Group:
-        desired_sync_states: list[tuple[SyncStatus, str, rich.style.Style]] = [
-            (SyncStatus.DIRTY, "Dirty", rich.style.Style(color="dark_red")),
-            (SyncStatus.AHEAD, "Unsynced", rich.style.Style(color="pale_violet_red1")),
+        sync_panels: list[rich.panel.Panel] = [
+            SyncPanel(backup_type.name(), crawl_result.backups[backup_type], show_clean)
+            for backup_type in crawl_result.backups
         ]
-        if show_clean:
-            desired_sync_states.append(
-                (SyncStatus.CLEAN, "Clean", rich.style.Style(color="green"))
+        output.append(rich.console.Group(*sync_panels))
+        self.console.print(
+            rich.panel.Panel.fit(
+                rich.console.Group(*output), box=rich.box.SIMPLE_HEAD, padding=(0, 0)
             )
-
-        sync_panels: list[rich.panel.Panel] = []
-        for backup_type in crawl_result.backups:
-            result_panels: list[rich.panel.Panel] = []
-            for enum_state, status_string, border_style in desired_sync_states:
-                filtered_paths = [
-                    t.path
-                    for t in crawl_result.backups[backup_type]
-                    if t.status == enum_state
-                ]
-                new_panel = rich.panel.Panel(
-                    "\n".join([str(x) for x in filtered_paths]),
-                    border_style=border_style,
-                )
-                new_panel.title = status_string
-                new_panel.title_align = "left"
-
-                result_panels.append(new_panel)
-            new_sync_panel = rich.panel.Panel.fit(rich.console.Group(*result_panels))
-            new_sync_panel.title = backup_type.name()
-            new_sync_panel.title_align = "left"
-
-            sync_panels.append(new_sync_panel)
-        all_sync_panels = rich.console.Group(*sync_panels)
-        return all_sync_panels
+        )
