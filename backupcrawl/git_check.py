@@ -40,6 +40,7 @@ class GitDirChecker(DirChecker):
 
     @staticmethod
     def name() -> str:
+        """Display name of the backup entry type"""
         return "Git"
 
     def check_dir(self, path: Path) -> GitBackupEntry:

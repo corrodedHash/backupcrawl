@@ -31,6 +31,43 @@ def _check_directory(path: Path, dir_checks: list[DirChecker]) -> BackupEntry:
     return BackupEntry(path, SyncStatus.NONE)
 
 
+def _filter_directory(
+    root: Path,
+    ignore_paths: list[str],
+    result: CrawlResult,
+) -> tuple[list[Path], list[Path]]:
+    found_files: list[Path] = []
+    recurse_dirs: list[Path] = []
+
+    def is_ignored(check_path: Path) -> bool:
+        return any(
+            fnmatch(str(check_path), os.path.expanduser(cur_pattern))
+            for cur_pattern in ignore_paths
+        )
+
+    filtered_paths = (x for x in root.iterdir() if not is_ignored(x))
+    non_symlinks = (x for x in filtered_paths if not x.is_symlink())
+    for current_path in non_symlinks:
+        if current_path.is_file():
+            if not os.access(current_path, os.R_OK):
+                result.denied_paths.append(current_path)
+                continue
+
+            found_files.append(current_path)
+
+        elif current_path.is_dir():
+            if not os.access(current_path, os.R_OK | os.X_OK):
+                result.denied_paths.append(current_path)
+                continue
+
+            recurse_dirs.append(current_path)
+        else:
+            # If path is not a directory, or a file,
+            # it is some socket or pipe. We don't care
+            pass
+    return (found_files, recurse_dirs)
+
+
 def _dir_crawl(
     root: Path,
     ignore_paths: list[str],
@@ -40,41 +77,13 @@ def _dir_crawl(
     """Iterates depth first looking for git repositories"""
     MODULE_LOGGER.debug("Entering %s", root)
     result = CrawlResult(root)
-    found_files: list[Path] = []
-    recurse_dirs: list[Path] = []
 
-    for current_path in root.iterdir():
-        if any(
-            fnmatch(str(current_path), os.path.expanduser(cur_pattern))
-            for cur_pattern in ignore_paths
-        ):
-            continue
+    backup_result = _check_directory(root, checks[0])
+    if backup_result.status != SyncStatus.NONE:
+        result.add_backup(backup_result)
+        return result
 
-        if current_path.is_symlink():
-            continue
-
-        if current_path.is_file():
-            if not os.access(current_path, os.R_OK):
-                result.denied_paths.append(current_path)
-                continue
-            found_files.append(current_path)
-            continue
-
-        if not current_path.is_dir():
-            # If path is not a directory, or a file,
-            # it is some socket or pipe. We don't care
-            continue
-
-        if not os.access(current_path, os.R_OK | os.X_OK):
-            result.denied_paths.append(current_path)
-            continue
-
-        backup_result = _check_directory(current_path, checks[0])
-        if backup_result.status != SyncStatus.NONE:
-            result.add_backup(backup_result)
-            continue
-
-        recurse_dirs.append(current_path)
+    (found_files, recurse_dirs) = _filter_directory(root, ignore_paths, result)
 
     status.open_paths(recurse_dirs)
     status.open_paths(found_files)
