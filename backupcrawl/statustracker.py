@@ -8,6 +8,8 @@ import rich.console
 import rich.live
 import rich.markup
 import rich.text
+import rich.progress
+import rich.progress_bar
 from typing_extensions import Self
 
 
@@ -23,6 +25,9 @@ class TimingStatusTracker(AbstractContextManager["TimingStatusTracker"]):
         self.start_time = time.time()
         self.last_status_time = self.start_time
         self.last_opened: str | None = None
+
+        self.opened_first_level: list[Path] = []
+        self.closed_first_level: list[Path] = []
 
     def __enter__(self) -> Self:
         return self
@@ -42,11 +47,15 @@ class TimingStatusTracker(AbstractContextManager["TimingStatusTracker"]):
         self.open_count += len(paths)
         if paths:
             self.last_opened = str(paths[-1])
+            if len(paths[-1].relative_to(self.root).parents) == 1:
+                self.opened_first_level += paths
         self._maybe_update()
 
-    def close_path(self, _path: Path) -> None:
+    def close_path(self, path: Path) -> None:
         """Event to close path"""
         self.close_count += 1
+        if len(path.relative_to(self.root).parents) == 1:
+            self.closed_first_level.append(path)
         self._maybe_update()
 
     @property
@@ -61,11 +70,18 @@ class TimingStatusTracker(AbstractContextManager["TimingStatusTracker"]):
         status_text.append(f"{self.open_count - self.close_count:>4}", style="#ADD8E6")
         status_text.append(" + ")
         status_text.append(f"{self.close_count:>6}", style="#808080")
-        status_text.append("\n\t")
-        status_text.append(rich.markup.escape(str(self.last_opened)))
+        current_path = rich.text.Text(rich.markup.escape(str(self.last_opened)))
+
+        progress_bar = rich.progress_bar.ProgressBar(
+            len(self.opened_first_level), len(self.closed_first_level), width=30
+        )
 
         self.live_display.update(
-            status_text,
+            rich.console.Group(
+                progress_bar,
+                status_text,
+                current_path,
+            ),
             refresh=True,
         )
 

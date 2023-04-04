@@ -62,13 +62,13 @@ class ResultPrinter:
     def print(self, crawl_result: CrawlResult, show_clean: bool = False) -> None:
         """Prints result of crawl"""
 
-        loose_paths = rich.panel.Panel.fit(
+        loose_paths = rich.panel.Panel(
             "\n".join([str(x) for x in crawl_result.loose_paths]),
             title="Not backed up",
             title_align="left",
         )
 
-        denied_paths = rich.panel.Panel.fit(
+        denied_paths = rich.panel.Panel(
             "\n".join([str(x) for x in crawl_result.denied_paths]),
             title="Permission denied",
             title_align="left",
