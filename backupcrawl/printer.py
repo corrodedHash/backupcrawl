@@ -36,7 +36,10 @@ class SyncPanel(rich.panel.Panel):
         }
 
         filtered_states = [x for x in desired_sync_states if filtered_entries[x]]
-
+        self.display_count = sum(
+            len(x)
+            for x in [filtered_entries[enum_state] for enum_state in filtered_states]
+        )
         result_panels = [
             rich.panel.Panel(
                 "\n".join([str(x.path) for x in filtered_entries[enum_state]]),
@@ -79,11 +82,13 @@ class ResultPrinter:
             output.append(loose_paths)
         if crawl_result.denied_paths:
             output.append(denied_paths)
-        sync_panels: list[rich.panel.Panel] = [
+        sync_panels = [
             SyncPanel(backup_type.name(), crawl_result.backups[backup_type], show_clean)
             for backup_type in crawl_result.backups
         ]
-        output.append(rich.console.Group(*sync_panels))
+        output.append(
+            rich.console.Group(*[x for x in sync_panels if x.display_count > 0])
+        )
         self.console.print(
             rich.panel.Panel.fit(
                 rich.console.Group(*output), box=rich.box.SIMPLE_HEAD, padding=(0, 0)
