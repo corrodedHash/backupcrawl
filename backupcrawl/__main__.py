@@ -8,7 +8,7 @@ from typing import Any
 
 import rich.console
 
-from backupcrawl.printer import ResultPrinter
+from backupcrawl.printer import ConsoleResultPrinter, JsonResultPrinter
 from backupcrawl.statustracker import TimingStatusTracker
 from . import crawler
 
@@ -44,6 +44,9 @@ def main() -> None:
     )
     parser.add_argument("--progress", "-p", action="store_true")
     parser.add_argument("--ignore", "-i", action="append", default=[])
+    parser.add_argument(
+        "--format", "-f", choices=["json", "console"], default="console"
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level="WARNING")
@@ -56,8 +59,12 @@ def main() -> None:
         ignore_paths=config.get("ignore_paths", []) + args.ignore,
         status=(TimingStatusTracker(args.path, console) if args.progress else None),
     )
-
-    ResultPrinter(console).print(crawl_result, show_clean=args.all)
+    if args.format == "json":
+        JsonResultPrinter().print(crawl_result, show_clean=args.all)
+    else:
+        if args.format != "console":
+            print("Unknown output format")
+        ConsoleResultPrinter(console).print(crawl_result, show_clean=args.all)
 
 
 if __name__ == "__main__":
