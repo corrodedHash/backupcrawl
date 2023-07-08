@@ -67,18 +67,54 @@ class PathTracker:
         return self.open_count - self.close_count
 
 
+class PathTrackerDisplay(rich.live.Live):
+    """Progress display for crawling in directory using `PathTracker`"""
+    def __init__(self, path_tracker: PathTracker, console: rich.console.Console):
+        self.progress_bar = rich.progress.Progress(
+            rich.progress.BarColumn(),
+            rich.progress.TimeElapsedColumn(),
+            rich.progress.TextColumn("{task.fields[open_delta]:>4}", style="#ADD8E6"),
+            rich.progress.TextColumn(" + "),
+            rich.progress.TextColumn("{task.fields[close_count]}", style="#808080"),
+        )
+        self.progress_bar_task = self.progress_bar.add_task("Crawling", start=True)
+        self.progress_path = rich.text.Text()
+        self.path_tracker = path_tracker
+        super().__init__(
+            rich.console.Group(self.progress_bar, self.progress_path),
+            console=console,
+            refresh_per_second=8
+        )
+
+    def refresh(self) -> None:
+        self.progress_bar.update(
+            self.progress_bar_task,
+            total=len(self.path_tracker.opened_first_level),
+            completed=len(self.path_tracker.closed_first_level),
+            open_delta=self.path_tracker.open_delta,
+            close_count=self.path_tracker.close_count,
+        )
+
+        self.progress_path.truncate(0)
+        if self.path_tracker.last_opened is not None:
+            self.progress_path.append(
+                rich.markup.escape(str(self.path_tracker.last_opened))
+            )
+        return super().refresh()
+
+
 class TimingStatusTracker(AbstractContextManager["TimingStatusTracker"]):
     """Trackes status of crawling"""
 
     def __init__(self, root: Path, console: rich.console.Console):
-        self.live_display = rich.live.Live(None, console=console, transient=True)
-        self.live_display.start()
         self.root = root
         self.status_update_ticker = Stopwatch()
 
         self.path_tracker = PathTracker(root)
+        self.progress = PathTrackerDisplay(self.path_tracker, console)
 
     def __enter__(self) -> Self:
+        self.progress.__enter__()
         return self
 
     def __exit__(
@@ -89,8 +125,7 @@ class TimingStatusTracker(AbstractContextManager["TimingStatusTracker"]):
     ) -> None:
         """Notify the status tracker, that crawling has stopped"""
         self.path_tracker.last_opened = None
-        self._print_status()
-        self.live_display.stop()
+        self.progress.__exit__(exc_type, exc_val, exc_tb)
 
     def open_paths(self, paths: list[Path]) -> None:
         """Event to open paths"""
@@ -102,40 +137,11 @@ class TimingStatusTracker(AbstractContextManager["TimingStatusTracker"]):
         self.path_tracker.close_path(path)
         self._maybe_update()
 
-    def _print_status(self) -> None:
-        status_text = rich.text.Text()
-        status_text.append(
-            f"{self.status_update_ticker.total_time:>7.2f}", style="bold"
-        )
-        status_text.append(" ")
-        status_text.append(f"{self.path_tracker.open_delta:>4}", style="#ADD8E6")
-        status_text.append(" + ")
-        status_text.append(f"{self.path_tracker.close_count:>6}", style="#808080")
-        current_path = rich.text.Text(
-            rich.markup.escape(str(self.path_tracker.last_opened))
-        )
-
-        progress_bar = rich.progress_bar.ProgressBar(
-            len(self.path_tracker.opened_first_level),
-            len(self.path_tracker.closed_first_level),
-            width=30,
-        )
-
-        self.live_display.update(
-            rich.console.Group(
-                progress_bar,
-                status_text,
-                *([current_path] if self.path_tracker.last_opened is not None else []),
-            ),
-            refresh=True,
-        )
-
     def _maybe_update(self) -> None:
         """Prints current status"""
         if self.status_update_ticker.lap_time < 0.1:
             return
         self.status_update_ticker.lap()
-        self._print_status()
 
 
 class VoidStatusTracker:
