@@ -77,6 +77,7 @@ def _dir_crawl(
     """Iterates depth first looking for git repositories"""
     MODULE_LOGGER.debug("Entering %s", root)
     result = CrawlResult(root)
+    status.current_path(root)
 
     backup_result = _check_directory(root, checks[0])
     if backup_result.status != SyncStatus.NONE:
