@@ -1,0 +1,21 @@
+[package]
+name = "backupcrawl-test-components"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.component]
+target = { path = "wit", world = "plugin" }
+
+[dependencies]
+# Raw wit-bindgen, pinned to the version cargo-component 0.21.1 generates its
+# own bindings with. The authoring SDK (M1.2) is intentionally not used here:
+# this fixture exercises the bare WIT contract.
+wit-bindgen.workspace = true
