@@ -27,7 +27,7 @@ Integration branch: `feat/rust-rewrite` in `/run/opencode-agent/coding/worktrees
 | Task | Worktree | Branch | Status |
 | --- | --- | --- | --- |
 | M1.1 foundation | `worktrees/m1-foundation` | `feat/m1.1-foundation` | done, merged as `de193d5` |
-| M1.7 gix spike | `worktrees/m1-gix-spike` | `feat/m1.7-gix-spike` | running (dispatched 2026-10-11) |
+| M1.7 gix spike | `worktrees/m1-gix-spike` | `feat/m1.7-gix-spike` | paused, partial work committed as `8e8bd21` (see `spikes/gix-feasibility/STATUS.md`) |
 | M1.2 SDK | `worktrees/m1-sdk` (to create) | `feat/m1.2-plugin-sdk` | not started |
 | M1.3 manifest/discovery | `worktrees/m1-manifest` (to create) | `feat/m1.3-manifest-discovery` | not started |
 | M1.4 host runtime | `worktrees/m1-host` (to create) | `feat/m1.4-wasm-host` | not started |
@@ -121,4 +121,18 @@ with `CARGO_TARGET_DIR`, and a final-report requirement (commits, evidence, devi
 - 2026-10-11: M1.1 reviewed and merged into `feat/rust-rewrite` (`de193d5`). Acceptance on the
   merged tree: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
   `cargo test --workspace` all green. Frozen decisions are now in the code; tooling reality
-  recorded above. M1.7 still running.
+  recorded above.
+- 2026-10-11: M1.7 paused on request after its subagent run was interrupted by a transient
+  model-availability error. Partial work committed as `8e8bd21` on `feat/m1.7-gix-spike`
+  with `spikes/gix-feasibility/STATUS.md` (what works, what is broken, resume commands).
+  State: component builds and loads; 3/16 fixture tests pass; blocker is an `UnexpectedEof`
+  during status iteration for repos with tracked files. Root-cause breadcrumb: status →
+  `gix_status` `index_as_worktree::HashEq::compare_blobs` → `stream_worktree_file` →
+  `gix_object::compute_stream_hash` → `gix_hash::io::bytes_with_hasher`, which does
+  `read_exact` for the reported stream length; next step is to find why length and stream
+  disagree on wasm (probe `read_exact` on a WASI file; inspect `Stream::size()`).
+  Resume M1.7 in parallel with wave 1 (it is independent); when merging it into the
+  integration branch, expect a small conflict in the root `[workspace]` table
+  (`exclude = ["spikes"]` vs the M1.1 members rewrite) — the spike is a standalone workspace
+  with its own lockfile, so the conflict is trivial. Wave 1 (M1.2, M1.3) can start next
+  session and does not depend on M1.7; M1.8 does.
