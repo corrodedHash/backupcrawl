@@ -12,6 +12,8 @@ Goals:
 - Core only knows: how to walk the filesystem, how to query plugins, how to aggregate and print.
 - The four mechanisms that matter first: **git, pacman, syncthing, chezmoi**. Symlinks are a
   first-class filesystem object handled by the core, with plugins allowed to claim them.
+- Replace the Python implementation at the repository root; the Python code lives on only in git
+  history (tagged before the rewrite). There are no users, so no compatibility is owed.
 
 Non-goals:
 
@@ -221,14 +223,18 @@ interface host {
 }
 ```
 
+> Note: the fs imports above (`read-file`, `read-dir`, `metadata`, `read-link`) are the
+> custom-import variant; whether plugins read files this way or through read-only WASI preopens is
+> the open decision analyzed in Appendix A. `exec`, `cache`, `http` and `log` are custom imports
+> either way (WASI has no process spawning, and we want allowlists for the rest).
+
 Design notes:
 
-- **No WASI.** Detectors are pure components importing only the host interface above. This keeps
-  path handling uniform (host-style absolute paths), makes the policy layer trivial to audit and
-  makes unit tests possible with a mock host. Consequence: detector code cannot use crates that
-  call `std::fs`/`std::process` directly (e.g. `gix`, `reqwest`). Our four detectors don't need
-  to; a future optional `wasi:filesystem` preopen capability can be added for third-party
-  components that do (open question 14.2).
+- **Filesystem access is the one open ABI question** (Appendix A): custom read-only fs imports
+  (uniform absolute-path policy, auditable, but plugins cannot use `std::fs`-based crates) vs
+  read-only `wasi:filesystem` preopens (standard `std::fs`, battle-tested path sandbox, but
+  directory-level grants and no read audit). `exec`/`http`/`cache`/`log` are custom imports in
+  both variants.
 - **Host fs is read-only and policy-checked.** Every path is canonicalized and must fall under
   `{crawl-root}` (implicit for all detectors) or an explicit `fs-read` root from the manifest.
   Symlink escapes (a path that canonicalizes outside the grant) are denied. No write/edit API
@@ -614,15 +620,14 @@ in a muted panel and it never counts as "unbacked data found".
 ## 8. Statuses, aggregation and output
 
 - Statuses: `clean`, `dirty`, `ahead`, `unknown`, plus optional `ignored`, `recoverable`
-  (section 3). Existing printers map `ahead` to "Unsynced" as today.
+  (section 3). Console panels label `ahead` as "Unsynced".
 - Panels: per-plugin, split into Dirty / Unsynced / Unknown / Clean (`Clean` only with `--all`).
   Loose / denied / symlink panels as today plus the new symlink panel.
-- JSON: recommend a versioned schema (`"schema": 2`), with per-plugin lowercase status keys and
-  attrs. A `--format json-v1` compatibility mode can emit the Python key layout
-  (`Dirty`/`Unsynced`/`Clean`) during migration. Open question 14.3.
-- Exit codes (new): `--fail-on unbacked|error|never` (default `never`, preserving 0.2.6 behavior):
-  `1` = unbacked data found, `2` = plugin/config error. A scriptable alternative to scraping
-  output.
+- JSON: a versioned schema (`"schema": 1`), with per-plugin lowercase status keys and attrs. No
+  Python-compatibility mode (decision in section 14).
+- Exit codes: `--fail-on unbacked|error|never` (default `never`). A default scan of `/` will
+  almost always find something, so a permanent non-zero exit would make the default useless in
+  scripts; scripts opt in. `1` = unbacked data found, `2` = plugin/config error.
 
 ## 9. Performance and parallelism
 
@@ -672,8 +677,7 @@ buggy or malicious. The host protects the machine.
 
 ## 11. Config, CLI and distribution
 
-Config (TOML, `~/.config/backupcrawl/config.toml`; the legacy JSON rcfile is accepted with a
-deprecation warning):
+Config (TOML, `~/.config/backupcrawl/config.toml`; TOML only, no legacy JSON rcfile):
 
 ```toml
 [ignore]
@@ -722,35 +726,38 @@ trust prompt.
 
 | Phase | Deliverable |
 | --- | --- |
-| M0 | Workspace skeleton; core walker + result model + console/JSON printers; everything loose; legacy CLI/rcfile parsing; parity tests vs Python fixtures |
+| M0 | Workspace at the repo root (tag `python-0.2.6` first, then remove the Python package); core walker + result model + console/JSON printers; everything loose; CLI/config; fixture-based tests |
 | M1 | wasmtime host MVP: manifest, discovery, trust prompt, `init/check-dir/check-file/finish`, host imports fs/exec/cache/log, limits; **git plugin** with porcelain-v2 parsing (fixes upstream bug); `plugins list/info` |
-| M2 | **pacman plugin** parity (`-Ql`/`-Qkk`, unknown-reason reporting); symlink basic handling (own panel/JSON, no following); golden-output tests; legacy JSON schema mode |
+| M2 | **pacman plugin** parity (`-Ql`/`-Qkk`, unknown-reason reporting); symlink basic handling (own panel/JSON, no following); golden-output tests |
 | M3 | **chezmoi plugin**; **syncthing plugin**; `unknown`/`ignored` statuses wired through printers; `--ignored`, exit codes, `--stats` |
 | M4 | Parallel crawl + per-worker instances + single-flight cache; progress display; trust/config polish; `plugin new` + SDK docs; first third-party plugin example |
 | M5 | Native pacman db parser (drop exec); optional native chezmoi source-tree parser; candidate plugins (recoverable status, restic/borg, cloud markers); optional WASI preopen capability for third-party components |
 
-## 13. Parity checklist (explicitly preserved vs deliberately changed)
+## 13. Behavior inventory: carried over vs changed
 
-Preserved: positional path defaulting to `/`; `-v/-a/-p/-i/-f`; JSON keys `not_backed_up`,
-`permission_denied` (in compat mode); per-plugin panels with Dirty/Unsynced/Clean; empty panels
-hidden; ignored special files (sockets/FIFOs); permission-denied collection; loose-path collapsing;
-first-claim-wins; dir claim prunes subtree; pacman backup-file semantics (`dirty` = edited).
+The Python tool has no users, so nothing here is a compatibility requirement; this is a checklist
+of what is worth keeping and what the rewrite intentionally does differently.
 
-Deliberately changed: git no-upstream no longer counts as `ahead`; symlinks are reported instead of
-skipped; ignored files can be reported; pacman path-with-spaces parsing fixed; single `git status`
-call per repo; ancestor repos can be detected; new statuses `unknown`/`ignored` (and optionally
-`recoverable`); JSON schema v2; exit codes; TOML config preferred.
+Carried over because it works well: positional path defaulting to `/`; per-plugin panels with
+Dirty/Unsynced/Clean and hidden empty panels; ignored special files (sockets/FIFOs);
+permission-denied collection; loose-path collapsing; first-claim-wins; dir claim prunes the
+subtree; pacman backup-file semantics (`dirty` = edited); `--all`, `--ignore` and `--progress`
+ideas; configurable ignore patterns.
+
+Deliberately changed: CLI and config are redesigned (TOML config, subcommands, `--fail-on`)
+instead of being flag-compatible; git no-upstream counts as `unknown` instead of `ahead`; symlinks
+are reported instead of skipped; ignored files can be reported; pacman path-with-spaces parsing
+fixed; single `git status` call per repo; ancestor repos can be detected; new statuses
+`unknown`/`ignored` (and optionally `recoverable`); own JSON schema; exit codes.
 
 ## 14. Open questions (with recommended defaults)
 
-1. **Repo layout:** keep `corrodedHash/backupcrawl` with a `rust/` subdirectory or
-   move the Python version to a branch and make the workspace the repo root? *Recommend: new repo
-   layout on `main`, tag the last Python version.*
-2. **No-WASI vs WASI preopens:** pure host imports (uniform policy, plugins can't use `std::fs`
-   crates like `gix`) vs `wasi:filesystem` preopens (library compatibility, coarser policy).
-   *Recommend: host imports for v1; optional preopen capability later.*
-3. **JSON output:** schema v2 with `--format json-v1` compat, or keep the Python schema exactly?
-   *Recommend: v2 + compat flag.*
+1. **Repo layout (resolved):** the Rust workspace becomes the repository root; the Python
+   implementation is deleted from `main` and kept only in git history (tag `python-0.2.6` first).
+2. **Filesystem access for plugins** — see Appendix A for the extended analysis.
+   *Recommendation: read-only WASI preopens for file access, custom host imports for
+   exec/http/cache/log.*
+3. **JSON output (resolved):** free to design; no Python-compatible mode. Version the schema field.
 4. **Status extensions:** accept `unknown`/`ignored`; add `recoverable` now or later?
    *Recommend: `unknown`/`ignored` yes (wire from the start), `recoverable` later.*
 5. **Multiple simultaneous claims:** keep first-wins or allow a path to be reported by several
@@ -759,5 +766,90 @@ call per repo; ancestor repos can be detected; new statuses `unknown`/`ignored` 
 6. **`--follow-symlinks`:** implement in M3 or defer? *Recommend: defer traversal, ship reporting.*
 7. **Plugin distribution/trust:** sidecar `plugin.toml` next to the `.wasm` — simplest; embedding
    manifest in a wasm custom section — single file. *Recommend: sidecar now, custom section later.*
-8. **Config format:** TOML with legacy JSON acceptance. *Recommend: yes.*
+8. **Config format (resolved):** TOML only; no legacy JSON rcfile.
 9. **Naming:** "detector" as the plugin kind name (vs "checker"/"provider")? *Recommend: detector.*
+
+## Appendix A. Filesystem access for plugins: WASI preopens vs custom host imports
+
+*Open decision as of 2026-10-11. Everything else in the ABI is unaffected by it.*
+
+### A.1 The problem
+
+A WebAssembly component has no operating-system access by default. There are no syscalls, no
+files, no network, no processes: a component can compute, and it can call functions the embedder
+(backupcrawl) explicitly provides. For a detector to read `.git/HEAD`, syncthing's `config.xml` or
+`/var/lib/pacman/local/...`, the embedder must hand it a way to do so. There are two established
+ways, and they produce very different plugin code.
+
+### A.2 Option A: custom host imports (what section 5.1 sketches)
+
+The WIT contract defines `read-file`, `read-dir`, `metadata`, `read-link`; the guest calls
+`backupcrawl:host/fs.read-file(path)`; host code checks the path against the plugin's grants, opens
+the file, and returns the bytes. WASI is not linked at all, and `std::fs` cannot work.
+
+- Policy is ours: canonicalize, enforce `{crawl-root}` + declared roots, deny symlink escapes, log
+  every read, cap read sizes, and even deny-list sensitive paths while still crawling them.
+- No standard-library file access: plugin code cannot use `std::fs`, `gix`, `notify`, or any crate
+  that assumes a real filesystem without adapting it. Plugin authors use the SDK.
+- Test-friendly: the host interface is a trait; a native mock makes unit tests trivial.
+
+### A.3 Option B: WASI with read-only preopened directories
+
+WASI is the standard "OS interface" for wasm components and is *capability-based*: at
+instantiation the host builds a context listing directories to expose and the guest path each
+appears at ("preopens"), with explicit permissions. A component can also import other WASI
+interfaces (`clocks`, `random`, `environment`) or none.
+
+Concrete example — instantiating the git detector for `backupcrawl /home/u`:
+
+- preopen `/home/u` at guest path `/home/u`, read-only (crawl root);
+- preopen `~/.config/git` at its absolute path, read-only (extra manifest grant);
+- empty environment, no sockets, no process API (WASI has none);
+- plugin code does `std::fs::read_to_string("/home/u/proj/.git/HEAD")` and it works.
+
+The sandbox is enforced by wasmtime's `cap-std` layer: `..` escapes and symlinks that leave the
+preopens are rejected; read-only directories make writes fail. When the crawl root is `/`, the
+preopen is `/` — read-only whole-filesystem visibility for that plugin, which is exactly what a
+scan of `/` implies (credential caveat in A.5).
+
+### A.4 Comparison
+
+| Dimension | A: custom fs imports | B: WASI preopens |
+| --- | --- | --- |
+| Plugin code | SDK calls only; no `std::fs` | idiomatic `std::fs`; ecosystem crates work (`gix`, `roxmltree`, ...) |
+| Path policy | ours, path-level, can deny-list | wasmtime/`cap-std`, directory-level |
+| Read auditing | every read logged/countable | not visible to the host |
+| Writes | impossible (no API) | impossible only because preopens are read-only (configuration) |
+| TOCTOU / symlink correctness | our responsibility | battle-tested (`cap-std`) |
+| Host implementation effort | more code; we own the security-critical part | less code; wasmtime provides it |
+| Testing plugins | trivial mocks | run under a WASI host (also easy) |
+| WASI version dependency | none | pin wasmtime/toolchain to WASI 0.2/0.3 |
+| Future native detectors (pacman mtree parsing) | easy (our reads) | easy, except Unix metadata (A.5) |
+| Third-party authoring in other languages | requires a port of our SDK | standard WASI toolchains |
+
+What the options mean for the four planned detectors: git and chezmoi `exec` their tools either
+way; syncthing reads one config file and does HTTP; only pacman's phase-2 native database parser
+is filesystem-heavy. So the choice is less about our four plugins and more about what future
+plugin authors can write and how much policy the host can enforce.
+
+### A.5 Caveats that apply to both options
+
+- **WASI has no process spawning.** `exec` is a custom host import in every variant; the allowlist,
+  timeout and audit live in our host. A plugin granted `exec` can hand the child `git`/`pacman`
+  arbitrary arguments, and those tools can read (and print) files the plugin itself cannot — so fs
+  sandboxing guards against accidents and against plugins *without* exec, not against a malicious
+  plugin that has exec.
+- **Unix metadata.** WASI 0.2 file metadata exposes type, size, timestamps and link targets, but
+  not Unix mode/uid/gid. If the native pacman parser needs those, a small custom `host-stat`
+  import must stay regardless of the choice.
+- **Whole-root scans.** Crawling `/` means the crawl-root grant is `/` for every plugin that needs
+  to inspect the crawled tree. The trust prompt must show this plainly (`fs: read /`).
+
+### A.6 Recommendation
+
+**Option B for file access, custom imports for everything else** (exec, http, cache, log) — the
+hybrid. Reasons: plugin authors get `std::fs` and the Rust ecosystem (including `gix`, if we ever
+replace `exec git`); sandbox path resolution is implemented by a battle-tested library instead of
+by us; and the audit argument for A is weak once `exec` exists — the meaningful, enforceable
+policies here are exec allowlists, HTTP allowlists and read-only-ness, all of which the hybrid
+keeps. Choose A only if read auditing or a path-level deny-list becomes a hard requirement.
