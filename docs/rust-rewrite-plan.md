@@ -764,8 +764,8 @@ trust prompt.
 ## 12. Milestones
 
 Phase overview; each phase gets a task list with acceptance criteria when work on it starts
-(M0 is broken down below). The Python implementation is already preserved by tag `v0.2.6`, so
-no tagging ceremony is needed before the rewrite branch removes it.
+(M0 is implemented and M1 is broken down below). The Python implementation is already preserved
+by tag `v0.2.6` and was removed in M0.
 
 | Phase | Theme | Deliverable |
 | --- | --- | --- |
@@ -802,6 +802,105 @@ Acceptance for every task: `cargo fmt --check`, `cargo clippy --all-targets -- -
   when:* `assert_cmd` integration tests cover defaults, config+flag merge and invalid config.
 - **M0.5 Wrap-up.** README and `--help` text final; manual smoke run on a scratch tree; commits
   reviewable per task.
+
+*Implemented on this branch (`5f118b1`): workspace, walker, printers, CLI/config, 16 tests;
+`cargo fmt`, clippy `-D warnings` and `cargo test` green.*
+
+### M1 task breakdown
+
+M1 is the host and the first detector. wasmtime, `wit-bindgen`/`cargo-component` and the
+`wasm32-wasip2` target are pinned in M1.1; the gix spike (M1.7) decides whether the git plugin
+ships on gix by default in this milestone or only behind `backend = "exec"`.
+
+- **M1.1 CI baseline + WIT contract.** GitHub Actions workflow running `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo test`. Add `rust-toolchain.toml` (stable +
+  `wasm32-wasip2` target) and a `crates/backupcrawl-wit` crate containing the finalized
+  `backupcrawl:detector@1.0.0` package: types (`status` without `recoverable`, `attr`, `claim`,
+  `scan-info`, `link-info`), the `detector` interface (`init`, `check-dir`, `check-file`,
+  `check-symlink`, `check-files`, `finish`) and the `host` interface (`stat`, `exec`,
+  `cache-get`/`cache-set`, `http`, `log`). Host bindings are generated with
+  `wasmtime::component::bindgen!`. Decisions: `check-files` stays in `@1` and must behave exactly
+  like singular calls (the SDK provides a default implementation that loops the singular calls);
+  the host keeps using singular calls until the M4 bulk work. Test components are prebuilt
+  `.wasm` files checked in under `tests/fixtures/` next to their source plus a rebuild script;
+  CI fails if an artifact is stale.
+  *Done when:* the WIT package builds, generated host bindings compile, and a fixture component
+  instantiates in a test.
+- **M1.2 Plugin SDK (`backupcrawl-plugin-sdk`).** Detector authoring crate: a native
+  `Detector`-style trait plus a `Host` trait (stat/exec/cache/http/log) so detector logic is
+  unit-testable with mocks under plain `cargo test` (no wasm toolchain needed); a
+  `bind_detector!` macro emits the component exports, including the `check-files` default that
+  loops the singular calls; `scan-info`/plugin-config plumbing.
+  *Done when:* an example plugin's logic passes native unit tests with a mock host, the same crate
+  builds with `cargo component build` to `wasm32-wasip2`, and the artifact loads in the host.
+- **M1.3 Manifest, discovery and `plugins list|info`.** `plugin.toml` parsing (name, version,
+  api, description, license, hooks + priority, capabilities, optional config schema); discovery
+  in order `--plugin-dir`, `$XDG_CONFIG_HOME/backupcrawl/plugins/`,
+  `/usr/lib/backupcrawl/plugins/`, bundled (embedded registry via `include_bytes!`, initially
+  empty), with user > system > bundled precedence; api compatibility and required-capability
+  validation (unknown manifest keys warn, unknown required capabilities are load errors);
+  `plugins list` and `plugins info <name>` print resolved capabilities, including
+  `fs: read /`.
+  *Done when:* fixture-based tests cover precedence, api mismatch, unknown keys and capability
+  errors; `plugins list|info` output is golden-tested.
+- **M1.4 wasmtime host runtime + imports + limits.** Instantiation per detector with a read-only
+  `/` preopen and an empty environment; memory cap (256 MiB default) and fuel/epoch interruption
+  (cooperative cancel every ~50 ms); host imports: `stat` (mode/uid/gid/nlink), `exec`
+  (program allowlist, timeout, output caps), `cache` (persistent per-plugin KV under
+  `$XDG_CACHE_HOME/backupcrawl/plugins/<name>/`), `http` (scheme/host/port/path-prefix
+  allowlist, size caps, no redirects to non-allowlisted hosts) and `log`; lifecycle sequencing
+  init → checks → finish with per-plugin error accounting — call errors become "no claim", a
+  circuit breaker after N consecutive failures disables the plugin for the scan, `finish`
+  errors and disable reasons end up in the run report.
+  *Done when:* host integration tests with fixture components cover successful
+  init/check/finish, disabled-on-init-error, trap handling, fuel exhaustion and each host import
+  (including exec timeout and cache round-trip).
+- **M1.5 Trust flow.** sha256 manifest hashing; unknown hash → interactive prompt that prints the
+  capabilities (exec grants first, `fs: read /` plainly) or `--trust-plugin=NAME` for
+  non-interactive use; hash change re-prompts; the trust list persists in
+  `~/.config/backupcrawl/config.toml` (`[plugins.trust]`). Decision to document: bundled plugins
+  are auto-trusted (they ship with the binary and are covered by its integrity) while
+  third-party plugins always prompt until trusted; §10 is updated accordingly.
+  *Done when:* tests cover the unknown-hash path (non-interactive via flag), hash-change
+  re-prompt and trust-list round-trip; bundled auto-trust is documented.
+- **M1.6 Detector façade + walker integration.** `Detector` trait in core (`init`, `check_dir`,
+  `check_file`, `check_symlink`, `finish`) with `WasmDetector` in the host and a native
+  `FixtureDetector` for core tests; the walker asks detectors in priority order, the first
+  `Some(claim)` wins, `prune = true` stops the descent while `prune = false` keeps it, file
+  hooks are served from detector state; per-plugin panels and JSON entries wired through the
+  printers plus the `plugins: git ok, ...` run report line; CLI gains `--plugins a,b,c`,
+  `--no-plugins` and repeatable `--plugin-dir`. The trait carries `check_symlink` already, but
+  the walker keeps skipping symlinks until M2.
+  *Done when:* core tests with fixture detectors cover first-claim-wins, prune, claim-then-descend
+  and loose-path interaction; CLI golden tests show per-plugin panels and JSON entries.
+- **M1.7 gix feasibility spike (timeboxed, ~2 days).** Build a minimal component that uses `gix`
+  on `wasm32-wasip2` with mmap/file-locking features disabled; run status and upstream comparison
+  on real repositories, including a large one, and measure wall time; record which gix features
+  and crates were needed and any blockers in §7.1 of this plan.
+  *Done when:* the spike either proves gix workable with a documented feature set, or identifies
+  concrete blockers that make `backend = "exec"` the M1 default (recommendation recorded in §7.1).
+- **M1.8 git plugin on gix.** Managed detection (`.git` directory, `.git` file
+  worktree/submodule, bare repo → `clean` with `bare = true` + prune, ancestor repos via
+  `gix::discover` when `ancestor-repos`); status with porcelain-v2 semantics (dirty =
+  modified/staged/renamed/conflicted/untracked); propagated via `branch.ab` with
+  `no-upstream = unknown|ahead|clean` (default `unknown`) and behind noted as attr; ignored files
+  when `report-ignored`; detached HEAD/unborn → `unknown`, dirty wins; unreadable repo → `unknown`
+  with attr; one status computation per repository cached in the instance and served to the file
+  hook; config keys of §7.1. The embedded registry from M1.3 is filled with this plugin.
+  *Done when:* golden tests against fixture repos (created with the git CLI in tests) cover
+  clean/dirty/ahead/no-upstream/ignored/worktree/bare/nested/ancestor cases and reproduce the
+  documented porcelain-v2 reference semantics.
+- **M1.9 git exec fallback (behind `backend = "exec"`).** Parse `git status --porcelain=v2
+  --branch --ignored=matching` and `for-each-ref` exactly as specified in §7.1, run with
+  `GIT_OPTIONAL_LOCKS=0`, disabled when the `git` binary is missing; outputs match the gix
+  backend on the same fixtures.
+  *Done when:* parity tests pass for both backends (skipped when `git` is unavailable).
+- **M1.10 Wrap-up.** README plugin section and a short plugin-authoring doc (build with
+  `cargo component build`, manifest fields, capabilities, testing with the SDK mock); manual
+  smoke run of `backupcrawl ~` on a real home directory; plan doc updated with the spike results
+  and any ABI learnings.
+  *Done when:* docs updated, `cargo fmt`/clippy/`cargo test` green, and the git panel shows up in
+  a real scan.
 
 ## 13. Behavior inventory: carried over vs changed
 
