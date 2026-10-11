@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Installs the toolchain, components and wasm targets from rust-toolchain.toml.
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - run: cargo fmt --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets -- -D warnings
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  components:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+      # Pin the same cargo-component that produced the checked-in fixture;
+      # fall back to building it from source when no prebuilt is available.
+      - name: Install cargo-component (prebuilt)
+        id: install-cargo-component
+        continue-on-error: true
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-component@0.21.1
+      - name: Install cargo-component (from source)
+        if: steps.install-cargo-component.outcome == 'failure'
+        run: cargo install cargo-component --version 0.21.1 --locked
+      - name: Rebuild fixture components and fail on stale artifacts
+        run: |
+          scripts/build-test-components.sh
+          git diff --exit-code -- crates/backupcrawl-host/tests/fixtures

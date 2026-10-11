@@ -826,6 +826,21 @@ ships on gix by default in this milestone or only behind `backend = "exec"`.
   CI fails if an artifact is stale.
   *Done when:* the WIT package builds, generated host bindings compile, and a fixture component
   instantiates in a test.
+
+  *Implemented (M1.1, branch `feat/m1.1-foundation`):* `crates/backupcrawl-wit` is the single
+  source of truth (`crates/backupcrawl-wit/wit/detector.wit`, world `plugin`); plugin crates
+  symlink `wit` to it and a wit-parser round-trip test keeps the package honest. The host uses
+  `wasmtime::component::bindgen!` from wasmtime 49 (wit-parser 0.258). `rust-toolchain.toml` pins
+  stable + rustfmt/clippy and the `wasm32-wasip1`/`wasm32-wasip2` targets; cargo-component 0.21.1
+  builds `wasm32-wasip1` and adapts it to a component with the preview1 adapter
+  (`<target-dir>/wasm32-wasip1/{debug,release}/backupcrawl_test_components.wasm`). The fixture
+  `crates/test-components` uses raw `wit_bindgen::generate!` 0.41 (cargo-component's generated
+  `src/bindings.rs` is gitignored) and is rebuilt by `scripts/build-test-components.sh` into the
+  checked-in `crates/backupcrawl-host/tests/fixtures/test-detector.wasm`; CI fails when that
+  artifact is stale. `crates/backupcrawl-host/tests/fixture_smoke.rs` instantiates the fixture
+  with wasmtime-wasi (empty env, no preopens) and asserts its documented behavior. Workspace
+  `rust-version` is 1.96 (wasmtime 49 MSRV). Caveat: the committed artifact depends on the exact
+  toolchain, so after a stable bump re-run the rebuild script and commit the refreshed artifact.
 - **M1.2 Plugin SDK (`backupcrawl-plugin-sdk`).** Detector authoring crate: a native
   `Detector`-style trait plus a `Host` trait (stat/exec/cache/http/log) so detector logic is
   unit-testable with mocks under plain `cargo test` (no wasm toolchain needed); a

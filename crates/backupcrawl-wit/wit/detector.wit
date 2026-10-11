@@ -1,0 +1,109 @@
+package backupcrawl:detector@1.0.0;
+
+/// Shared types of the detector contract.
+interface types {
+  /// How a path relates to a backup mechanism.
+  enum status { clean, dirty, ahead, unknown, ignored }
+
+  record attr { key: string, value: string }
+
+  /// A detector's verdict for one path. No claim ("none") means
+  /// "not managed by me".
+  record claim {
+    status: status,
+    attrs: list<attr>,
+    prune: bool,
+  }
+
+  record scan-info {
+    root: string,
+    user: string,
+    follow-symlinks: bool,
+    config: list<attr>,
+  }
+
+  record link-info {
+    path: string,
+    target: string,
+    dangling: bool,
+  }
+}
+
+/// Host services available to a detector, each gated by capability.
+interface host {
+  enum file-kind { file, directory, symlink, other }
+
+  /// Unix metadata that WASI 0.2 does not expose (metadata only, no content).
+  record file-info {
+    kind: file-kind,
+    size: u64,
+    mtime-ms: u64,
+    mode: u32,
+    uid: u32,
+    gid: u32,
+    nlink: u64,
+  }
+
+  stat: func(path: string) -> result<file-info, string>;
+
+  record exec-request {
+    program: string,
+    args: list<string>,
+    cwd: option<string>,
+    env: list<tuple<string, string>>,
+    stdin: option<list<u8>>,
+    timeout-ms: option<u32>,
+  }
+
+  record exec-result {
+    code: s32,
+    stdout: list<u8>,
+    stderr: list<u8>,
+    timed-out: bool,
+  }
+
+  exec: func(req: exec-request) -> result<exec-result, string>;
+
+  cache-get: func(key: string) -> option<list<u8>>;
+  cache-set: func(key: string, value: list<u8>) -> result<_, string>;
+
+  record http-request {
+    method: string,
+    url: string,
+    headers: list<tuple<string, string>>,
+    body: option<list<u8>>,
+  }
+
+  record http-response {
+    status: u16,
+    headers: list<tuple<string, string>>,
+    body: list<u8>,
+  }
+
+  http: func(req: http-request) -> result<http-response, string>;
+
+  log: func(level: string, message: string);
+}
+
+/// The detector contract: one instance per detector per worker.
+interface detector {
+  use types.{claim, link-info, scan-info};
+
+  /// Called once before the scan; expensive preparation belongs here.
+  init: func(info: scan-info) -> result<_, string>;
+
+  check-dir: func(path: string) -> result<option<claim>, string>;
+  check-file: func(path: string) -> result<option<claim>, string>;
+  check-symlink: func(link: link-info) -> result<option<claim>, string>;
+
+  /// Bulk variant of check-file; must behave exactly like N singular calls.
+  check-files: func(paths: list<string>) -> result<list<option<claim>>, string>;
+
+  finish: func() -> result<_, string>;
+}
+
+/// The guest world: plugins import host services and export the detector.
+world plugin {
+  import host;
+  export detector;
+}
