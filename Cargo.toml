@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+members = ["crates/backupcrawl-core", "crates/backupcrawl-cli"]
+
+[workspace.package]
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["Lukas Wölfer"]
+license = "MIT"
+repository = "https://github.com/corrodedHash/backupcrawl"
+description = "Detect files which are not backed up"
+
+[workspace.dependencies]
+anyhow = "1"
+backupcrawl-core = { path = "crates/backupcrawl-core" }
+clap = { version = "4", features = ["derive"] }
+console = "0.15"
+dirs = "6"
+env_logger = "0.11"
+globset = "0.4"
+libc = "0.2"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+toml = "0.8"

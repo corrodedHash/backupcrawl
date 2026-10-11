@@ -789,9 +789,10 @@ Acceptance for every task: `cargo fmt --check`, `cargo clippy --all-targets -- -
 - **M0.2 Result model + walker.** Status enum (`clean/dirty/ahead/unknown/ignored`), entry and
   result types from section 6, `globset`-based ignore patterns with `~` expansion, depth-first
   walker reproducing Python semantics: unreadable paths → `denied`, sockets/FIFOs/devices
-  ignored, loose-path collapsing; detector hook points exist but none are wired yet, so
-  everything is loose; symlinks are skipped (M2 reports them). *Done when:* unit tests cover
-  traversal, ignore matching, denied paths and collapsing on fixture trees.
+  ignored, loose-path collapsing; the per-directory merge logic already models claims (always
+  empty in M0), so detectors slot in without reshaping the walker; symlinks are skipped (M2
+  reports them). *Done when:* unit tests cover traversal, ignore matching, denied paths and
+  collapsing on fixture trees.
 - **M0.3 Printers.** Console panels via `console` (loose/denied only for now; per-plugin panels
   appear in M1) and JSON with `"schema": 1`; deterministic sorting. *Done when:* golden tests
   cover both formats on a fixture tree.
