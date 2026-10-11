@@ -26,7 +26,7 @@ Integration branch: `feat/rust-rewrite` in `/run/opencode-agent/coding/worktrees
 
 | Task | Worktree | Branch | Status |
 | --- | --- | --- | --- |
-| M1.1 foundation | `worktrees/m1-foundation` | `feat/m1.1-foundation` | running (dispatched 2026-10-11) |
+| M1.1 foundation | `worktrees/m1-foundation` | `feat/m1.1-foundation` | done, merged as `de193d5` |
 | M1.7 gix spike | `worktrees/m1-gix-spike` | `feat/m1.7-gix-spike` | running (dispatched 2026-10-11) |
 | M1.2 SDK | `worktrees/m1-sdk` (to create) | `feat/m1.2-plugin-sdk` | not started |
 | M1.3 manifest/discovery | `worktrees/m1-manifest` (to create) | `feat/m1.3-manifest-discovery` | not started |
@@ -82,6 +82,26 @@ with `CARGO_TARGET_DIR`, and a final-report requirement (commits, evidence, devi
 4. Only then dispatch the next wave, branching from the updated `feat/rust-rewrite`.
 5. Never push; leave branches and worktrees in place for review.
 
+## Tooling reality (verified while implementing M1.1)
+
+- cargo-component 0.21.1 builds and componentizes **wasm32-wasip1** (bundled preview1
+  adapter), not wasm32-wasip2; artifact path is
+  `<CARGO_TARGET_DIR>/wasm32-wasip1/{debug,release}/<crate_name>.wasm`. Do not pass
+  `--target wasm32-wasip2` to `cargo component build`.
+- `wit-bindgen` is pinned to **0.41** (the version cargo-component 0.21.1 generates with).
+  `cargo component add` is for WIT component dependencies, not for adding the Rust crate.
+- Host bindgen that works with wasmtime 49.0.2:
+  `wasmtime::component::bindgen!({ path: "../backupcrawl-wit/wit", world: "plugin", additional_derives: [PartialEq] })`
+  (path relative to `CARGO_MANIFEST_DIR`); generated: `Plugin` world struct, host import trait
+  `backupcrawl::detector::host::Host`, export accessor `plugin.backupcrawl_detector_detector()`.
+  WASI must be linked (`wasmtime_wasi::p2::add_to_linker_sync`) or instantiation fails.
+- Workspace `rust-version` was bumped to 1.96 (wasmtime 49 MSRV).
+- The fixture artifact is toolchain-sensitive: after a stable-toolchain bump, rerun
+  `scripts/build-test-components.sh` and commit the refreshed `.wasm` or CI fails.
+- `crates/test-components` stays on raw wit-bindgen (not the SDK) so the host smoke test
+  exercises the contract directly; `plugins/git` is a stub with no detector exports until M1.8
+  (discovery/validation must handle that).
+
 ## Environment notes
 
 - Toolchain: rust 1.99 stable; cargo-component 0.21.1 installed via `cargo install`;
@@ -98,3 +118,7 @@ with `CARGO_TARGET_DIR`, and a final-report requirement (commits, evidence, devi
 - 2026-10-11: M0 verified green. M1.1 (foundation) and M1.7 (gix spike) dispatched in parallel.
   Plan frozen in this file. Wave 1 (M1.2, M1.3) intentionally NOT started yet — resume after
   the two running tasks are reviewed and merged.
+- 2026-10-11: M1.1 reviewed and merged into `feat/rust-rewrite` (`de193d5`). Acceptance on the
+  merged tree: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo test --workspace` all green. Frozen decisions are now in the code; tooling reality
+  recorded above. M1.7 still running.
