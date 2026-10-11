@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
 members = ["crates/backupcrawl-core", "crates/backupcrawl-cli"]
+# The gix feasibility spike (M1.7) is a standalone workspace with its own lockfile
+# and a wasm component crate; keep it out of the main workspace.
+exclude = ["spikes"]
 
 [workspace.package]
 version = "0.3.0"

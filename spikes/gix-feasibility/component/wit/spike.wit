@@ -1,0 +1,16 @@
+package backupcrawl:spike@0.1.0;
+
+/// Minimal world for the M1.7 feasibility spike.
+///
+/// The real detector contract (`backupcrawl:detector@1.0.0`) is built by a
+/// parallel task; this world only exists to prove that gix works inside a
+/// wasm32-wasip2 component with a read-only preopen.
+world spike {
+    /// Inspect the git repository at `root` (a path in the guest filesystem).
+    ///
+    /// Returns a JSON summary with the branch/HEAD state, upstream ahead/behind
+    /// counts, working-tree status counts and an `error` field instead of
+    /// failing when the path is not a repository. `err` is reserved for
+    /// failures that prevent producing a summary at all.
+    export run: func(root: string) -> result<string, string>;
+}
