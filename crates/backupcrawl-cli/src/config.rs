@@ -20,6 +20,10 @@ pub struct Config {
     pub ignore: IgnoreConfig,
 
     /// Plugin settings.
+    ///
+    /// Read from M1.3 on (discovery, trust, ordering); frozen here for the
+    /// parallel M1 tasks.
+    #[allow(dead_code)]
     #[serde(default)]
     pub plugins: PluginsConfig,
 }
@@ -40,6 +44,7 @@ pub struct IgnoreConfig {
 /// [`extra`](PluginsConfig::extra); the matching detector receives its table
 /// as `scan-info.config` (M1.3/M1.4 wire it through).
 #[derive(Debug, Default, Deserialize)]
+#[allow(dead_code)] // fields are consumed by M1.3/M1.5/M1.6
 pub struct PluginsConfig {
     /// Explicitly enabled plugins; empty means "all discovered".
     #[serde(default)]
