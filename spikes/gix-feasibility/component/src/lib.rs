@@ -127,7 +127,12 @@ fn inspect(root: &str) -> Summary {
 }
 
 fn inspect_inner(root: &str, summary: &mut Summary) -> Result<(), String> {
-    let repo = gix::discover(root).map_err(|err| format!("not a git repository: {err:#}"))?;
+    // WASI exposes no Unix executable bit, so tell gix to ignore `core.fileMode`
+    // (the same behavior git uses on filesystems without an exec bit).
+    // Otherwise every tracked `100755` file is reported as modified.
+    let open_options = gix::open::Options::default().config_overrides(["core.fileMode=false".to_owned()]);
+    let repo = gix::discover_opts(root, Default::default(), open_options)
+        .map_err(|err| format!("not a git repository: {err:#}"))?;
 
     summary.repo = repo.workdir().map(display_path);
     summary.git_dir = Some(display_path(repo.git_dir()));
@@ -209,7 +214,13 @@ fn fill_upstream(repo: &gix::Repository, summary: &mut Summary) {
 /// HEAD↔index, index↔worktree, untracked files (not collapsed) and ignored
 /// entries (`--ignored=matching`).
 fn fill_status(repo: &gix::Repository, summary: &mut Summary) -> Result<(), String> {
-    let index = load_index(repo)?;
+    // gix opens and checksum-verifies `.git/index` itself (mmap through the
+    // vendored shim, timestamps through the vendored `filetime`), and falls
+    // back to an empty index on an unborn branch. The same snapshot is reused
+    // by submodule detection inside `status()`, so the index is not read twice.
+    let index = repo
+        .index_or_empty()
+        .map_err(|err| format!("failed to open index: {err:#}"))?;
 
     // Conflicts are not reliably part of the status iterator; read them from the
     // index, counting distinct paths (porcelain v2 emits one `u` record per path,
@@ -258,66 +269,4 @@ fn fill_status(repo: &gix::Repository, summary: &mut Summary) -> Result<(), Stri
 
 fn display_path(path: &std::path::Path) -> String {
     path.display().to_string()
-}
-
-/// Load `.git/index` without mmap and without `filetime`'s wasm stubs.
-///
-/// Two wasm problems are avoided here:
-/// - `repo.index_or_empty()` funnels into `gix_index::File::at()`, which maps
-///   the index with memmap2 unconditionally; memmap2 has no wasm
-///   implementation (the spike's shim makes that call work, but this loader
-///   does not depend on the patch).
-/// - `gix::index::State::new()` calls `FileTime::now()`, and
-///   `filetime::FileTime::from_last_modification_time()` is
-///   `unimplemented!()` on wasm; both are replaced with pure arithmetic.
-///
-/// The index checksum is not verified (equivalent to `skip_hash`); M1.8 can
-/// add verification if needed.
-fn load_index(repo: &gix::Repository) -> Result<gix::index::File, String> {
-    let path = repo.index_path();
-    let metadata = match std::fs::metadata(&path) {
-        Ok(metadata) => metadata,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            // Unborn branch or missing index: an empty index is correct.
-            return Ok(gix::index::File::from_state(empty_index_state(repo.object_hash())?, path));
-        }
-        Err(err) => return Err(format!("failed to stat index {}: {err}", path.display())),
-    };
-    let mtime = mtime_from_metadata(&metadata)?;
-    let data = std::fs::read(&path).map_err(|err| format!("failed to read index {}: {err}", path.display()))?;
-    let (state, _checksum) = gix::index::State::from_bytes(&data, mtime, repo.object_hash(), Default::default())
-        .map_err(|err| format!("failed to decode index {}: {err}", path.display()))?;
-    Ok(gix::index::File::from_state(state, path))
-}
-
-/// `metadata.modified()` without `filetime`'s unimplemented wasm `imp`.
-fn mtime_from_metadata(metadata: &std::fs::Metadata) -> Result<filetime::FileTime, String> {
-    let modified = metadata
-        .modified()
-        .map_err(|err| format!("failed to obtain index modification time: {err}"))?;
-    let since_epoch = modified
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|err| format!("index modification time is before the epoch: {err}"))?;
-    Ok(filetime::FileTime::from_unix_time(
-        since_epoch.as_secs() as i64,
-        since_epoch.subsec_nanos(),
-    ))
-}
-
-/// Build an empty index state without `gix::index::State::new()`, which calls
-/// `FileTime::now()` (`unimplemented!()` on wasm).
-fn empty_index_state(object_hash: gix::hash::Kind) -> Result<gix::index::State, String> {
-    let mut bytes = Vec::with_capacity(12 + object_hash.len_in_bytes());
-    bytes.extend_from_slice(b"DIRC");
-    bytes.extend_from_slice(&2u32.to_be_bytes()); // version 2
-    bytes.extend_from_slice(&0u32.to_be_bytes()); // no entries
-    bytes.resize(bytes.len() + object_hash.len_in_bytes(), 0); // zero checksum
-    gix::index::State::from_bytes(
-        &bytes,
-        filetime::FileTime::from_unix_time(0, 0),
-        object_hash,
-        Default::default(),
-    )
-    .map(|(state, _checksum)| state)
-    .map_err(|err| format!("failed to build empty index state: {err}"))
 }

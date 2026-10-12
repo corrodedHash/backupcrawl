@@ -20,3 +20,4 @@ publish = false
 # results" and vendor/memmap2-shim/src/lib.rs.
 [patch.crates-io]
 memmap2 = { path = "vendor/memmap2-shim" }
+filetime = { path = "vendor/filetime" }

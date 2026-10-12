@@ -90,22 +90,30 @@ unsafe impl Sync for Mmap {}
 
 impl Mmap {
     fn read(file: &File, options: &MmapOptions) -> io::Result<Self> {
-        let mut file = file;
-        if options.offset != 0 {
-            file.seek(SeekFrom::Start(options.offset))?;
-        }
+        // Emulate `mmap`, which reads through the mapping without touching the
+        // file's shared cursor. gix relies on this: `gix_index::File::at()`
+        // maps the index and then hashes it with `gix_hash::bytes(&mut file)`
+        // on the same handle, expecting the cursor to still be at 0. Reading
+        // with `read_to_end`/`read_exact` advances that cursor, so save and
+        // restore it (and seek to the requested offset).
+        let mut handle = file;
+        let saved_position = handle.stream_position().ok();
+        handle.seek(SeekFrom::Start(options.offset))?;
         let data = match options.len {
             Some(len) => {
                 let mut data = vec![0; len];
-                file.read_exact(&mut data)?;
+                handle.read_exact(&mut data)?;
                 data
             }
             None => {
                 let mut data = Vec::new();
-                file.read_to_end(&mut data)?;
+                handle.read_to_end(&mut data)?;
                 data
             }
         };
+        if let Some(position) = saved_position {
+            handle.seek(SeekFrom::Start(position))?;
+        }
         Ok(Mmap { data })
     }
 
