@@ -256,7 +256,7 @@ fn is_repo_root(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use backupcrawl_plugin_sdk::{Attr, Config, MockHost};
+    use backupcrawl_plugin_sdk::{Attr, Config, MockHost, Status};
     use std::path::PathBuf;
 
     fn scan_info(attrs: &[(&str, &str)]) -> ScanInfo {
@@ -321,6 +321,28 @@ mod tests {
                 .check_dir(Path::new("/data/plain-dir"), &mut host)
                 .unwrap(),
             None
+        );
+    }
+
+    #[test]
+    fn unreadable_repository_is_unknown_with_a_reason() {
+        let tmp = tempfile::tempdir().unwrap();
+        // A `.git` directory that is not a repository: detection claims the
+        // path, but opening fails, so the verdict is `unknown` with a reason.
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+
+        let mut detector = Git::default();
+        let mut host = MockHost::new();
+        detector.init(&scan_info(&[]), &mut host).unwrap();
+
+        let claim = detector
+            .check_dir(tmp.path(), &mut host)
+            .unwrap()
+            .expect("a broken repository is still claimed");
+        assert_eq!(claim.status, Status::Unknown);
+        assert!(
+            claim.attrs.iter().any(|attr| attr.key == "reason"),
+            "unknown must carry a reason: {claim:?}"
         );
     }
 
