@@ -33,7 +33,7 @@ Integration branch: `feat/rust-rewrite` in `/run/opencode-agent/coding/worktrees
 | M1.4 host runtime | `worktrees/m1-host` | `feat/m1.4-wasm-host` | done, merged as `69a8680` |
 | M1.5 trust flow | `worktrees/m1-trust` | `feat/m1.5-trust-flow` | done, merged as `10a5529` |
 | M1.8 git plugin | `worktrees/m1-git` (to create) | `feat/m1.8-git-plugin` | not started |
-| M1.6 walker integration | `worktrees/m1-integration` (to create) | `feat/m1.6-walker-integration` | not started |
+| M1.6 walker integration | `worktrees/m1-integration` | `feat/m1.6-walker-integration` | done, merged as `bcbdebf` |
 | M1.9 git exec fallback | `worktrees/m1-git-exec` (to create) | `feat/m1.9-git-exec-fallback` | not started |
 | M1.10 wrap-up | `worktrees/m1-wrapup` (to create) | `feat/m1.10-wrap-up` | not started |
 
