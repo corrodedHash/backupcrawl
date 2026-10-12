@@ -15,3 +15,8 @@ crate-type = ["cdylib"]
 target = { path = "wit", world = "plugin" }
 
 [dependencies]
+backupcrawl-plugin-sdk = { path = "../../crates/backupcrawl-plugin-sdk" }
+gix.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
