@@ -1,0 +1,23 @@
+# Standalone workspace for the M1.7 gix feasibility spike.
+#
+# This is intentionally not part of the main backupcrawl workspace: the component
+# crate is built with `cargo component` for wasm32-wasip2 and the runner needs a
+# full wasmtime, both of which must not leak into the main build.
+[workspace]
+resolver = "3"
+members = ["component", "runner"]
+exclude = ["vendor"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+# gix 0.89 uses memmap2 unconditionally (index, loose objects, packs, packed
+# refs) and memmap2 has no wasm implementation, so the spike patches in a
+# read-into-memory shim. See docs/rust-rewrite-plan.md §7.1 "M1.7 spike
+# results" and vendor/memmap2-shim/src/lib.rs.
+[patch.crates-io]
+memmap2 = { path = "vendor/memmap2-shim" }
+filetime = { path = "vendor/filetime" }
