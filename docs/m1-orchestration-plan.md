@@ -219,3 +219,9 @@ with `CARGO_TARGET_DIR`, and a final-report requirement (commits, evidence, devi
   earlier "not pushed" wrap-up note is stale — `feat/rust-rewrite` is on `origin` (this branch's
   merges happened after the remote branch was first pushed); no network in this session, so
   nothing was pushed now.
+- 2026-10-12: **Perf fix merged** (`fda45f7`, branch `perf/host-component-cache`). `Runtime` now
+  caches compiled components keyed by the SHA-256 of the wasm bytes, and the `git_plugin` tests
+  share one `Runtime` (`OnceLock`), so the 23 golden tests compile the gix component once instead
+  of 23 times. `cargo test --workspace` 2m07s → 27s; `git_plugin` ~2min → 4.6s. This closes the
+  §7.1 M1.4 note that the host must cache the compiled component. Remaining test time is dominated
+  by the CLI suite (one process per test, each compiling the bundled component).
