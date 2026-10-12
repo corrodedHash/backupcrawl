@@ -30,7 +30,7 @@ Integration branch: `feat/rust-rewrite` in `/run/opencode-agent/coding/worktrees
 | M1.7 gix spike | `worktrees/m1-gix-spike` | `feat/m1.7-gix-spike` | paused, partial work committed as `8e8bd21` (see `spikes/gix-feasibility/STATUS.md`) |
 | M1.2 SDK | `worktrees/m1-sdk` | `feat/m1.2-plugin-sdk` | done, merged as `efb468c` |
 | M1.3 manifest/discovery | `worktrees/m1-manifest` | `feat/m1.3-manifest-discovery` | done, merged as `d468f46` |
-| M1.4 host runtime | `worktrees/m1-host` (to create) | `feat/m1.4-wasm-host` | not started |
+| M1.4 host runtime | `worktrees/m1-host` | `feat/m1.4-wasm-host` | done, merged as `69a8680` |
 | M1.5 trust flow | `worktrees/m1-trust` | `feat/m1.5-trust-flow` | done, merged as `10a5529` |
 | M1.8 git plugin | `worktrees/m1-git` (to create) | `feat/m1.8-git-plugin` | not started |
 | M1.6 walker integration | `worktrees/m1-integration` (to create) | `feat/m1.6-walker-integration` | not started |
@@ -161,3 +161,10 @@ with `CARGO_TARGET_DIR`, and a final-report requirement (commits, evidence, devi
   and persists hashes into `[plugins.trust]` with `toml_edit` (other tables/comments preserved).
   `plugins list|info` show trust state; `plugins verify` exits 2 when a third-party plugin is
   untrusted. M1.6 should reuse the CLI `apply_trust`/`CliPrompt` on the crawl path.
+- 2026-10-12: M1.4 (wasmtime runtime, host imports, limits) merged into `feat/rust-rewrite`
+  (`69a8680`); conflict was the expected one-line module list in
+  `crates/backupcrawl-host/src/lib.rs` (kept `trust` + `runtime` and the re-exports). Acceptance
+  green (111 tests). `Runtime`/`WasmDetector`/`CapabilityPolicy`/`Limits` are the M1.6 entry
+  points; capability gating is manifest-driven; HTTP is localhost-only, plain `http` only;
+  cache is a per-plugin KV under `$XDG_CACHE_HOME/backupcrawl/plugins`. The test-components
+  fixture was rebuilt (scenario-driven) with a single codegen unit for reproducible artifacts.
