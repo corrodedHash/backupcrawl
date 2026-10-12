@@ -17,6 +17,13 @@ target_dir="${CARGO_TARGET_DIR:-$root/target}"
 artifact="$target_dir/wasm32-wasip1/release/backupcrawl_test_components.wasm"
 fixture="$root/crates/backupcrawl-host/tests/fixtures/test-detector.wasm"
 
+# Build with a single codegen unit. With multiple units, LLVM appends
+# `.llvm.<hash>` suffixes to colliding symbol names, and that hash depends on the
+# checkout/target path; the resulting artifact would then differ between
+# machines and the committed `git diff --exit-code` staleness check would fail.
+# One codegen unit removes those symbols and makes the component reproducible.
+export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+
 cargo component build --release -p backupcrawl-test-components
 
 if [[ ! -f "$artifact" ]]; then
