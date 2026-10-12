@@ -1,0 +1,7 @@
+[plugin]
+name = "pacman"
+version = "1.0.0"
+api = "1"
+
+[capabilities]
+fs-read = ["/var/lib/pacman"]

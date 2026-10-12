@@ -1,0 +1,4 @@
+[plugin]
+name = "bad-api"
+version = "0.1.0"
+api = "2"

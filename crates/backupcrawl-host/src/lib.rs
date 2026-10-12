@@ -13,4 +13,6 @@
 //! The WIT contract lives in `crates/backupcrawl-wit/wit`; the host generates
 //! its bindings from there with [`wasmtime::component::bindgen!`].
 
+pub mod bundled;
+pub mod discovery;
 pub mod manifest;
