@@ -3,7 +3,7 @@
 mod config;
 mod printer;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -11,10 +11,14 @@ use std::process::ExitCode;
 use anyhow::{Context, Result, bail};
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
+use backupcrawl_core::detector::{DetectorSlot, Hooks};
 use backupcrawl_core::ignore::IgnoreMatcher;
 use backupcrawl_core::walker;
-use backupcrawl_host::discovery::{self, SearchPaths};
+use backupcrawl_host::discovery::{self, DiscoveredPlugin, DiscoveryOutcome, SearchPaths};
 use backupcrawl_host::trust::{self, PluginTrust, TrustPrompt, TrustRequest};
+use backupcrawl_host::{Limits, Runtime};
+
+use crate::printer::PluginRunStatus;
 
 /// Search for non-backed up files.
 #[derive(Debug, Parser)]
@@ -36,13 +40,36 @@ struct Cli {
     #[arg(long, short, value_enum, default_value_t = Format::Console)]
     format: Format,
 
-    /// Also show backed-up paths (no effect until detectors land).
+    /// Also show clean (backed-up) claims in the panels.
     #[arg(long, short)]
     all: bool,
 
     /// Extra ignore glob, repeatable; applied on top of the config file.
     #[arg(long, short, value_name = "GLOB")]
     ignore: Vec<String>,
+
+    /// Extra plugin directory to scan; repeatable, tried in the given order
+    /// before the user, system and bundled sources.
+    #[arg(long = "plugin-dir", value_name = "DIR")]
+    plugin_dir: Vec<PathBuf>,
+
+    /// Only run the named detectors (comma-separated or repeated).
+    #[arg(
+        long = "plugins",
+        value_name = "a,b,c",
+        value_delimiter = ',',
+        conflicts_with = "no_plugins"
+    )]
+    plugins: Vec<String>,
+
+    /// Run the crawl without any detectors.
+    #[arg(long = "no-plugins")]
+    no_plugins: bool,
+
+    /// Trust the named plugin without prompting and persist its manifest hash;
+    /// repeatable. Non-interactive equivalent of the trust prompt.
+    #[arg(long = "trust-plugin", value_name = "NAME")]
+    trust_plugin: Vec<String>,
 
     /// Config file override [default: ~/.config/backupcrawl/config.toml].
     #[arg(long, value_name = "FILE")]
@@ -135,8 +162,10 @@ fn run(cli: &Cli) -> Result<()> {
     crawl(cli)
 }
 
+/// Crawls `cli.path` with the selected detectors and prints the result.
 fn crawl(cli: &Cli) -> Result<()> {
-    let config = load_config(cli.config.as_deref())?;
+    let context = trust_context(cli.config.as_deref())?;
+    let config = &context.config;
 
     let patterns = config
         .ignore
@@ -146,12 +175,181 @@ fn crawl(cli: &Cli) -> Result<()> {
         .chain(cli.ignore.iter().cloned());
     let matcher = IgnoreMatcher::new(patterns).context("invalid ignore patterns")?;
 
-    let result = walker::scan(&cli.path, &matcher);
+    let outcome = discover_plugins(&cli.plugin_dir);
+    for error in &outcome.errors {
+        eprintln!("warning: {}", error.display());
+    }
+
+    let enabled = select_enabled(cli, config, &outcome);
+    for name in requested_names(cli, config) {
+        if outcome.get(name).is_none() {
+            eprintln!("warning: plugin `{name}` was requested but not discovered");
+        }
+    }
+
+    let plugins = ordered_plugins(&outcome, &enabled, &config.plugins.order);
+    let trust = apply_trust(&context, &plugins, &outcome, &cli.trust_plugin, true)?;
+
+    // Build the detector slots and remember, in detector order, what happened to
+    // each plugin so the run report line can include skipped ones too.
+    enum Pending {
+        Ran(usize),
+        Skipped(String),
+    }
+
+    let mut slots: Vec<DetectorSlot> = Vec::new();
+    let mut pending: Vec<(String, Pending)> = Vec::new();
+    let mut runtime: Option<Runtime> = None;
+
+    for plugin in &plugins {
+        if !trust[&plugin.name].trusted {
+            pending.push((
+                plugin.name.clone(),
+                Pending::Skipped("untrusted".to_owned()),
+            ));
+            continue;
+        }
+        if runtime.is_none() {
+            runtime = Some(Runtime::new(Limits::default())?);
+        }
+        match runtime
+            .as_ref()
+            .expect("runtime")
+            .instantiate_plugin(plugin)
+        {
+            Ok(detector) => {
+                let index = slots.len();
+                slots.push(DetectorSlot::new(
+                    plugin.name.clone(),
+                    plugin_config(config, &plugin.name),
+                    hooks_of(plugin),
+                    Box::new(detector),
+                ));
+                pending.push((plugin.name.clone(), Pending::Ran(index)));
+            }
+            Err(err) => {
+                eprintln!("warning: cannot load plugin `{}`: {err:#}", plugin.name);
+                pending.push((
+                    plugin.name.clone(),
+                    Pending::Skipped(format!("load failed: {err:#}")),
+                ));
+            }
+        }
+    }
+
+    let result = walker::scan(&cli.path, &matcher, &mut slots);
+
+    let run: Vec<PluginRunStatus> = pending
+        .into_iter()
+        .map(|(name, pending)| match pending {
+            Pending::Skipped(reason) => PluginRunStatus::disabled(name, reason),
+            Pending::Ran(index) => PluginRunStatus::ran(name, &slots[index].detector.report()),
+        })
+        .collect();
+
     match cli.format {
-        Format::Console => printer::print_console(&result, cli.all),
+        Format::Console => printer::print_console(&result, cli.all, &run),
         Format::Json => printer::print_json(&result)?,
     }
     Ok(())
+}
+
+/// The plugin names the run explicitly asked for (flags first, then config),
+/// used to warn about names that were not discovered.
+fn requested_names<'a>(cli: &'a Cli, config: &'a config::Config) -> Vec<&'a String> {
+    if !cli.plugins.is_empty() {
+        cli.plugins.iter().collect()
+    } else {
+        config.plugins.enabled.iter().collect()
+    }
+}
+
+/// Resolves the enabled detector names: `--no-plugins` beats `--plugins`, which
+/// beats `[plugins] enabled`, which (when empty) means "everything discovered".
+fn select_enabled(
+    cli: &Cli,
+    config: &config::Config,
+    outcome: &DiscoveryOutcome,
+) -> BTreeSet<String> {
+    if cli.no_plugins {
+        return BTreeSet::new();
+    }
+    if !cli.plugins.is_empty() {
+        return cli.plugins.iter().cloned().collect();
+    }
+    if !config.plugins.enabled.is_empty() {
+        return config.plugins.enabled.iter().cloned().collect();
+    }
+    outcome
+        .plugins
+        .iter()
+        .map(|plugin| plugin.name.clone())
+        .collect()
+}
+
+/// Orders the selected plugins: `[plugins] order` (when set) pins the listed
+/// plugins first, in the given sequence; the rest follow by ascending
+/// `hooks.priority` and then name, so the order is always deterministic.
+fn ordered_plugins(
+    outcome: &DiscoveryOutcome,
+    enabled: &BTreeSet<String>,
+    order: &[String],
+) -> Vec<DiscoveredPlugin> {
+    let position = |name: &str| order.iter().position(|item| item == name);
+    let mut selected: Vec<DiscoveredPlugin> = outcome
+        .plugins
+        .iter()
+        .filter(|plugin| enabled.contains(&plugin.name))
+        .cloned()
+        .collect();
+
+    selected.sort_by(
+        |left, right| match (position(&left.name), position(&right.name)) {
+            (Some(a), Some(b)) => a.cmp(&b),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => left
+                .manifest
+                .hooks
+                .priority
+                .cmp(&right.manifest.hooks.priority)
+                .then_with(|| left.name.cmp(&right.name)),
+        },
+    );
+    selected
+}
+
+/// The hooks a discovered plugin declared.
+fn hooks_of(plugin: &DiscoveredPlugin) -> Hooks {
+    Hooks {
+        dir: plugin.manifest.hooks.dir,
+        file: plugin.manifest.hooks.file,
+        symlink: plugin.manifest.hooks.symlink,
+    }
+}
+
+/// Flattens a `[plugins.<name>]` table into the string pairs handed to a
+/// detector's `init`. Strings are passed verbatim; other TOML values use their
+/// canonical textual form.
+fn plugin_config(config: &config::Config, name: &str) -> Vec<(String, String)> {
+    config
+        .plugins
+        .extra
+        .get(name)
+        .map(|table| {
+            table
+                .iter()
+                .map(|(key, value)| (key.clone(), toml_value(value)))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn toml_value(value: &toml::Value) -> String {
+    match value {
+        toml::Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
 }
 
 fn run_plugins(args: &PluginsArgs) -> Result<()> {
@@ -163,15 +361,21 @@ fn run_plugins(args: &PluginsArgs) -> Result<()> {
 }
 
 fn plugins_list(args: &PluginDirArgs) -> Result<()> {
-    let context = trust_context(args)?;
+    let context = trust_context(args.config.as_deref())?;
     let outcome = discover_plugins(&args.plugin_dir);
-    let trust = apply_trust(&context, &outcome.plugins, &outcome, args, true)?;
+    let trust = apply_trust(
+        &context,
+        &outcome.plugins,
+        &outcome,
+        &args.trust_plugin,
+        true,
+    )?;
     printer::print_plugins_list(&outcome, &context.config.plugins, &trust);
     Ok(())
 }
 
 fn plugins_info(args: &PluginInfoArgs) -> Result<()> {
-    let context = trust_context(&args.dirs)?;
+    let context = trust_context(args.dirs.config.as_deref())?;
     let outcome = discover_plugins(&args.dirs.plugin_dir);
 
     let Some(plugin) = outcome.get(&args.name) else {
@@ -185,7 +389,7 @@ fn plugins_info(args: &PluginInfoArgs) -> Result<()> {
         &context,
         std::slice::from_ref(plugin),
         &outcome,
-        &args.dirs,
+        &args.dirs.trust_plugin,
         true,
     )?;
     printer::print_plugins_info(plugin, &trust[&args.name]);
@@ -196,11 +400,17 @@ fn plugins_info(args: &PluginInfoArgs) -> Result<()> {
 /// code 2 when any third-party plugin is not trusted. Read-only (no prompt, no
 /// config write).
 fn plugins_verify(args: &PluginDirArgs) -> Result<()> {
-    let context = trust_context(args)?;
+    let context = trust_context(args.config.as_deref())?;
     let outcome = discover_plugins(&args.plugin_dir);
     // A `--trust-plugin` name only answers the question "would this be trusted";
     // verify never persists.
-    let trust = apply_trust(&context, &outcome.plugins, &outcome, args, false)?;
+    let trust = apply_trust(
+        &context,
+        &outcome.plugins,
+        &outcome,
+        &args.trust_plugin,
+        false,
+    )?;
 
     printer::print_plugins_verify(&outcome, &trust);
 
@@ -227,11 +437,13 @@ struct TrustContext {
     config_path: Option<PathBuf>,
 }
 
-fn trust_context(dirs: &PluginDirArgs) -> Result<TrustContext> {
-    let config = load_config(dirs.config.as_deref())?;
-    let config_path = dirs.config.clone().or_else(config::Config::default_path);
+fn trust_context(config: Option<&Path>) -> Result<TrustContext> {
+    let loaded = load_config(config)?;
+    let config_path = config
+        .map(Path::to_path_buf)
+        .or_else(config::Config::default_path);
     Ok(TrustContext {
-        config,
+        config: loaded,
         config_path,
     })
 }
@@ -246,15 +458,15 @@ fn trust_context(dirs: &PluginDirArgs) -> Result<TrustContext> {
 /// way the answer never blocks a pipeline.
 fn apply_trust(
     context: &TrustContext,
-    plugins: &[discovery::DiscoveredPlugin],
-    discovered: &discovery::DiscoveryOutcome,
-    dirs: &PluginDirArgs,
+    plugins: &[DiscoveredPlugin],
+    discovered: &DiscoveryOutcome,
+    trust_plugin: &[String],
     persist: bool,
 ) -> Result<BTreeMap<String, PluginTrust>> {
-    let mut prompt = CliPrompt::new(&dirs.trust_plugin, io::stdin().is_terminal());
+    let mut prompt = CliPrompt::new(trust_plugin, io::stdin().is_terminal());
     let evaluations = trust::evaluate_all(plugins, &context.config.plugins.trust, &mut prompt);
 
-    for name in &dirs.trust_plugin {
+    for name in trust_plugin {
         if discovered.get(name).is_none() {
             eprintln!("warning: --trust-plugin `{name}` matches no discovered plugin");
         }

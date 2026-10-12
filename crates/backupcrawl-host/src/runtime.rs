@@ -7,16 +7,16 @@
 //! detector** (a store is not `Sync`, section 9), with a read-only `/` preopen
 //! and an empty environment.
 //!
-//! [`WasmDetector`] exposes an inherent API whose shape maps 1:1 onto the core
-//! `Detector` trait M1.6 introduces (`init`, `check_dir`, `check_file`,
-//! `check_symlink`, `check_files`, `finish`, all returning core-shaped
-//! `Option<Claim>` results). It owns the lifecycle and failure accounting from
-//! section 5.4: a guest `Err`/trap becomes "no claim", consecutive failures trip
-//! a circuit breaker, an `init` error disables the plugin for the scan, and
-//! [`WasmDetector::report`] surfaces errors, notes and the disable reason for the
-//! run report.
+//! [`WasmDetector`] implements the core
+//! [`Detector`](backupcrawl_core::detector::Detector) trait. Its inherent API
+//! (`init`, `check_dir`, `check_file`, `check_symlink`, `check_files`,
+//! `finish`) maps 1:1 onto the trait, and both use the transport-neutral records
+//! defined in `backupcrawl_core::detector` (this crate re-exports them). It owns
+//! the lifecycle and failure accounting from section 5.4: a guest `Err`/trap
+//! becomes "no claim", consecutive failures trip a circuit breaker, an `init`
+//! error disables the plugin for the scan, and [`Detector::report`] surfaces
+//! errors, notes and the disable reason for the run report.
 
-use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,114 +29,13 @@ use wasmtime::{Config as WasmConfig, Engine, Store, UpdateDeadline};
 use wasmtime_wasi::p2;
 
 use backupcrawl_core::Status;
+use backupcrawl_core::detector::{
+    Attr, Claim, Detector, DetectorError, DetectorReport, LinkInfo, ScanInfo,
+};
 
 use crate::bindings::{Plugin, detector_exports, wit_types};
 use crate::imports::{CapabilityPolicy, HostState};
 use crate::limits::Limits;
-
-/// A free-form key/value pair attached to a [`Claim`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Attr {
-    /// Attribute name, e.g. `package`.
-    pub key: String,
-    /// Attribute value, e.g. `bash`.
-    pub value: String,
-}
-
-/// A detector's verdict for one path.
-///
-/// `None` (returned by the check methods) means "not managed by me". This is the
-/// host-shaped twin of the WIT `types.claim` record and of the core `Claim` M1.6
-/// introduces.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Claim {
-    /// The verdict.
-    pub status: Status,
-    /// Details shown in `--all` output.
-    pub attrs: Vec<Attr>,
-    /// Do not descend into this directory.
-    pub prune: bool,
-}
-
-/// Context for one scan, handed to [`WasmDetector::init`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScanInfo {
-    /// Directory the crawl started at.
-    pub root: PathBuf,
-    /// Name of the user running the crawl.
-    pub user: String,
-    /// Whether the walker follows symlinks.
-    pub follow_symlinks: bool,
-    /// This plugin's configuration table (flattened `[plugins.<name>]`).
-    pub config: Vec<(String, String)>,
-}
-
-/// A symlink seen by the walker, handed to [`WasmDetector::check_symlink`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LinkInfo {
-    /// Path of the symlink itself.
-    pub path: PathBuf,
-    /// Target the link points at (not necessarily resolved).
-    pub target: PathBuf,
-    /// Whether the target does not exist.
-    pub dangling: bool,
-}
-
-/// A detector lifecycle failure.
-#[derive(Debug)]
-pub enum DetectorError {
-    /// The plugin is disabled for the rest of the scan (init error or circuit
-    /// breaker). The walker must stop asking it.
-    Disabled {
-        /// Detector name.
-        name: String,
-        /// Human-readable reason for the run report.
-        reason: String,
-    },
-    /// A host-side failure (engine, store, serialization), not a guest error.
-    Host(anyhow::Error),
-}
-
-impl fmt::Display for DetectorError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Disabled { name, reason } => {
-                write!(f, "detector `{name}` is disabled: {reason}")
-            }
-            Self::Host(err) => write!(f, "{err:#}"),
-        }
-    }
-}
-
-impl std::error::Error for DetectorError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Host(err) => Some(err.as_ref()),
-            Self::Disabled { .. } => None,
-        }
-    }
-}
-
-impl From<anyhow::Error> for DetectorError {
-    fn from(err: anyhow::Error) -> Self {
-        Self::Host(err)
-    }
-}
-
-/// Per-detector outcome for the run report.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DetectorReport {
-    /// Detector name.
-    pub name: String,
-    /// Number of guest calls made (checks plus `init`/`finish`).
-    pub calls: u64,
-    /// Number of failed guest calls (errors or traps).
-    pub errors: u32,
-    /// Disable reason, if the plugin was disabled mid-scan.
-    pub disabled: Option<String>,
-    /// Human-readable notes (init failure, breaker trip, finish error, ...).
-    pub notes: Vec<String>,
-}
 
 /// Shared runtime: engine, linker, limits and the epoch watchdog.
 ///
@@ -356,7 +255,7 @@ impl WasmDetector {
     /// Calls the guest `init` exactly once.
     pub fn init(&mut self, info: &ScanInfo) -> Result<(), DetectorError> {
         if self.initialized {
-            return Err(DetectorError::Host(anyhow::anyhow!(
+            return Err(DetectorError::Host(format!(
                 "detector `{}` was already initialized",
                 self.name
             )));
@@ -471,14 +370,14 @@ impl WasmDetector {
                 self.error_count += 1;
                 self.notes.push(note.clone());
                 self.consecutive_failures += 1;
-                Err(DetectorError::Host(anyhow::anyhow!("{note}")))
+                Err(DetectorError::Host(note))
             }
             Err(trap) => {
                 let note = format!("finish trapped: {trap:#}");
                 self.error_count += 1;
                 self.notes.push(note.clone());
                 self.consecutive_failures += 1;
-                Err(DetectorError::Host(anyhow::anyhow!("{note}")))
+                Err(DetectorError::Host(note))
             }
         }
     }
@@ -495,8 +394,9 @@ impl WasmDetector {
     fn refill(&mut self) -> Result<(), DetectorError> {
         self.store
             .set_fuel(self.limits.fuel_per_call)
-            .map_err(anyhow::Error::from)
-            .context("arming the detector fuel budget")?;
+            .map_err(|err| {
+                DetectorError::Host(format!("arming the detector fuel budget: {err:#}"))
+            })?;
         self.store.set_epoch_deadline(1);
         Ok(())
     }
@@ -510,13 +410,13 @@ impl WasmDetector {
             });
         }
         if !self.initialized {
-            return Err(DetectorError::Host(anyhow::anyhow!(
+            return Err(DetectorError::Host(format!(
                 "detector `{}` was not initialized",
                 self.name
             )));
         }
         if self.finished {
-            return Err(DetectorError::Host(anyhow::anyhow!(
+            return Err(DetectorError::Host(format!(
                 "detector `{}` has already finished",
                 self.name
             )));
@@ -570,7 +470,38 @@ impl WasmDetector {
     }
 }
 
-/// Converts a generated claim into the host-shaped [`Claim`].
+/// The wasm host is the production implementation of the core façade.
+///
+/// The inherent methods above already return core-shaped records, so the trait
+/// implementation is a thin delegation; the fully-qualified calls avoid
+/// recursing into the trait methods.
+impl Detector for WasmDetector {
+    fn init(&mut self, info: &ScanInfo) -> Result<(), DetectorError> {
+        WasmDetector::init(self, info)
+    }
+
+    fn check_dir(&mut self, path: &Path) -> Result<Option<Claim>, DetectorError> {
+        WasmDetector::check_dir(self, path)
+    }
+
+    fn check_file(&mut self, path: &Path) -> Result<Option<Claim>, DetectorError> {
+        WasmDetector::check_file(self, path)
+    }
+
+    fn check_symlink(&mut self, link: &LinkInfo) -> Result<Option<Claim>, DetectorError> {
+        WasmDetector::check_symlink(self, link)
+    }
+
+    fn finish(&mut self) -> Result<(), DetectorError> {
+        WasmDetector::finish(self)
+    }
+
+    fn report(&self) -> DetectorReport {
+        WasmDetector::report(self)
+    }
+}
+
+/// Converts a generated claim into the core-shaped [`Claim`].
 fn convert_claim(claim: detector_exports::Claim) -> Claim {
     let status = match claim.status {
         wit_types::Status::Clean => Status::Clean,

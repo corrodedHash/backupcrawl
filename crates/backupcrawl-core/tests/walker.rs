@@ -23,7 +23,7 @@ fn root_files_are_loose_and_loose_subtrees_collapse() {
     touch(&root.join("sub/b.txt"));
     touch(&root.join("sub/deeper/c.txt"));
 
-    let result = walker::scan(root, &matcher(&[]));
+    let result = walker::scan(root, &matcher(&[]), &mut []);
 
     assert_eq!(
         result.loose_paths,
@@ -40,7 +40,7 @@ fn empty_directories_are_invisible() {
     touch(&root.join("a.txt"));
     fs::create_dir_all(root.join("empty")).unwrap();
 
-    let result = walker::scan(root, &matcher(&[]));
+    let result = walker::scan(root, &matcher(&[]), &mut []);
 
     assert_eq!(result.loose_paths, vec![root.join("a.txt")]);
 }
@@ -52,7 +52,7 @@ fn ignore_patterns_apply_to_entries() {
     touch(&root.join("keep.txt"));
     touch(&root.join("skip/a.txt"));
 
-    let result = walker::scan(root, &matcher(&["*/skip"]));
+    let result = walker::scan(root, &matcher(&["*/skip"]), &mut []);
 
     assert_eq!(result.loose_paths, vec![root.join("keep.txt")]);
 }
@@ -64,7 +64,7 @@ fn patterns_match_the_full_path_like_fnmatch() {
     touch(&root.join("keep.txt"));
     touch(&root.join("nested/skip/a.txt"));
 
-    let result = walker::scan(root, &matcher(&["*nested/skip*"]));
+    let result = walker::scan(root, &matcher(&["*nested/skip*"]), &mut []);
 
     assert_eq!(result.loose_paths, vec![root.join("keep.txt")]);
 }
@@ -79,7 +79,7 @@ fn symlinks_are_skipped_for_now() {
     touch(&root.join("real.txt"));
     symlink(root.join("real.txt"), root.join("link.txt")).unwrap();
 
-    let result = walker::scan(root, &matcher(&[]));
+    let result = walker::scan(root, &matcher(&[]), &mut []);
 
     assert_eq!(result.loose_paths, vec![root.join("real.txt")]);
 }
@@ -108,7 +108,7 @@ fn unreadable_paths_are_denied() {
     fs::set_permissions(root.join("secret.txt"), fs::Permissions::from_mode(0o000)).unwrap();
     fs::set_permissions(root.join("locked"), fs::Permissions::from_mode(0o000)).unwrap();
 
-    let result = walker::scan(root, &matcher(&[]));
+    let result = walker::scan(root, &matcher(&[]), &mut []);
 
     // Restore permissions before asserting so cleanup can remove the tree.
     fs::set_permissions(root.join("secret.txt"), fs::Permissions::from_mode(0o644)).unwrap();

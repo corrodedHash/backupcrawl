@@ -168,3 +168,18 @@ with `CARGO_TARGET_DIR`, and a final-report requirement (commits, evidence, devi
   points; capability gating is manifest-driven; HTTP is localhost-only, plain `http` only;
   cache is a per-plugin KV under `$XDG_CACHE_HOME/backupcrawl/plugins`. The test-components
   fixture was rebuilt (scenario-driven) with a single codegen unit for reproducible artifacts.
+- 2026-10-12: M1.6 (detector façade + walker integration) implemented on
+  `feat/m1.6-walker-integration` (not merged). Core owns the shared records
+  (`backupcrawl-core::detector`) and the host re-exports them; `WasmDetector` implements the
+  core `Detector` trait (plus an optional `report()` accessor) with no parallel type set. Walker:
+  caller order (manifest `hooks.priority`, overridden by `[plugins] order`), first-claim-wins,
+  `prune` stops the descent while non-prune continues, `init`/`finish` bracket the scan, loose
+  collapsing unchanged. CLI: discovery + trust + `[plugins] enabled/order` + `Runtime`, new
+  `--plugins`/`--no-plugins`/`--plugin-dir`/`--trust-plugin`, per-plugin panels, JSON entries and
+  the `plugins: git ok, ...` run report line; `plugins list|info|verify` unchanged. Symlinks
+  remain skipped until M2. New committed CLI fixture: SDK example component under
+  `crates/backupcrawl-cli/tests/fixtures/detectors/dotbak` (rebuild with
+  `scripts/build-cli-fixture-plugin.sh`). Acceptance on the worktree: `cargo fmt --check`, clippy
+  `-D warnings`, `cargo test --workspace` all green (125 tests). Shared hotspots touched:
+  `crates/backupcrawl-core/src/{lib,walker}.rs`, `crates/backupcrawl-host/src/{lib,runtime}.rs`,
+  `crates/backupcrawl-cli/src/{main,printer}.rs`.
