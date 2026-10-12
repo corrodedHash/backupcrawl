@@ -16,3 +16,4 @@
 pub mod bundled;
 pub mod discovery;
 pub mod manifest;
+pub mod trust;
