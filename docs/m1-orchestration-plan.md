@@ -28,8 +28,8 @@ Integration branch: `feat/rust-rewrite` in `/run/opencode-agent/coding/worktrees
 | --- | --- | --- | --- |
 | M1.1 foundation | `worktrees/m1-foundation` | `feat/m1.1-foundation` | done, merged as `de193d5` |
 | M1.7 gix spike | `worktrees/m1-gix-spike` | `feat/m1.7-gix-spike` | paused, partial work committed as `8e8bd21` (see `spikes/gix-feasibility/STATUS.md`) |
-| M1.2 SDK | `worktrees/m1-sdk` (to create) | `feat/m1.2-plugin-sdk` | not started |
-| M1.3 manifest/discovery | `worktrees/m1-manifest` (to create) | `feat/m1.3-manifest-discovery` | not started |
+| M1.2 SDK | `worktrees/m1-sdk` | `feat/m1.2-plugin-sdk` | done, merged as `efb468c` |
+| M1.3 manifest/discovery | `worktrees/m1-manifest` | `feat/m1.3-manifest-discovery` | done, merged as `d468f46` |
 | M1.4 host runtime | `worktrees/m1-host` (to create) | `feat/m1.4-wasm-host` | not started |
 | M1.5 trust flow | `worktrees/m1-trust` (to create) | `feat/m1.5-trust-flow` | not started |
 | M1.8 git plugin | `worktrees/m1-git` (to create) | `feat/m1.8-git-plugin` | not started |
@@ -136,3 +136,21 @@ with `CARGO_TARGET_DIR`, and a final-report requirement (commits, evidence, devi
   (`exclude = ["spikes"]` vs the M1.1 members rewrite) — the spike is a standalone workspace
   with its own lockfile, so the conflict is trivial. Wave 1 (M1.2, M1.3) can start next
   session and does not depend on M1.7; M1.8 does.
+- 2026-10-12: Environment was reset between sessions: no Rust toolchain, no worktrees, no
+  `cargo-component`, and the `targets/` directories gone. Rebuilt: rust 1.99 stable +
+  `wasm32-wasip1`/`wasm32-wasip2`, `cargo-component` 0.21.1 (compiled from source; the
+  GitHub prebuilt asset was unavailable), and the four worktrees. Baseline on `feat/rust-rewrite`
+  (`f018422`) re-verified green.
+- 2026-10-12: M1.2 (SDK) and M1.3 (manifest/discovery) implemented by parallel subagents, then
+  reviewed and merged into `feat/rust-rewrite` (`efb468c`, `d468f46`); M1.7 resumed in parallel.
+  Acceptance on the merged tree all green: `cargo fmt --check`, `cargo clippy --all-targets -- -D
+  warnings`, `cargo test --workspace` (23 → 62 tests). The SDK example component builds with
+  `scripts/build-example-plugin.sh --release` (wasm32-wasip1). M1.2 delivered the mockable
+  `Detector`/`Host` traits, native records, a `MockHost`, and the `bind_detector!` macro
+  (WIT↔native glue, `thread_local` state, `check-files` default); M1.3 delivered `plugin.toml`
+  parsing (unknown keys warn, unknown capability names are load errors, API major = 1),
+  discovery with explicit > user > system > bundled precedence, an empty `bundled::REGISTRY`,
+  and `backupcrawl plugins list|info`. Integrator notes: M1.6 must add the crawl-level
+  `--plugin-dir` plumbing and consume `discovery::discover`/`PluginSource::Bundled`; M1.5 owns
+  manifest hashing/trust and bundled auto-trust. Root `Cargo.lock`/`Cargo.toml` and
+  `crates/backupcrawl-host/src/lib.rs` are the shared conflict points for later tasks.
