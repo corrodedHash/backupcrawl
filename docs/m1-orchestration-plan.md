@@ -27,7 +27,7 @@ Integration branch: `feat/rust-rewrite` in `/run/opencode-agent/coding/worktrees
 | Task | Worktree | Branch | Status |
 | --- | --- | --- | --- |
 | M1.1 foundation | `worktrees/m1-foundation` | `feat/m1.1-foundation` | done, merged as `de193d5` |
-| M1.7 gix spike | `worktrees/m1-gix-spike` | `feat/m1.7-gix-spike` | paused, partial work committed as `8e8bd21` (see `spikes/gix-feasibility/STATUS.md`) |
+| M1.7 gix spike | `worktrees/m1-gix-spike` | `feat/m1.7-gix-spike` | done, merged as `44cbe19` (gix workable on wasm) |
 | M1.2 SDK | `worktrees/m1-sdk` | `feat/m1.2-plugin-sdk` | done, merged as `efb468c` |
 | M1.3 manifest/discovery | `worktrees/m1-manifest` | `feat/m1.3-manifest-discovery` | done, merged as `d468f46` |
 | M1.4 host runtime | `worktrees/m1-host` | `feat/m1.4-wasm-host` | done, merged as `69a8680` |
@@ -183,3 +183,22 @@ with `CARGO_TARGET_DIR`, and a final-report requirement (commits, evidence, devi
   `-D warnings`, `cargo test --workspace` all green (125 tests). Shared hotspots touched:
   `crates/backupcrawl-core/src/{lib,walker}.rs`, `crates/backupcrawl-host/src/{lib,runtime}.rs`,
   `crates/backupcrawl-cli/src/{main,printer}.rs`.
+- 2026-10-12: M1.6 merged (`bcbdebf`); M1.7 (gix spike) finished and merged (`44cbe19`); the only
+  conflict was the expected root `Cargo.toml` `[workspace]` one — kept the full members list plus
+  `exclude = ["spikes"]`. Final acceptance on `feat/rust-rewrite`: `cargo fmt --check`, `cargo
+  clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` all green (126
+  tests); `scripts/build-test-components.sh` and `scripts/build-cli-fixture-plugin.sh` both
+  reproduce their committed artifacts byte-identically.
+- **M1.7 result:** gix 0.89 is workable on `wasm32-wasip2`; the `UnexpectedEof` was the memmap2
+  shim advancing the shared `File` cursor (real `mmap` does not), plus two further wasm gaps
+  (`filetime` and the Unix exec bit). All 16 porcelain-v2 fixture cases pass; release status on a
+  synthetic 50k-file repo is ~3.6 s (native `git status` ~31 ms), so the `exec` backend stays
+  selectable. **Recommendation: gix-default for M1.8**, `backend = "exec"` as fallback. Details in
+  `docs/rust-rewrite-plan.md` §7.1 and `spikes/gix-feasibility/STATUS.md`.
+- 2026-10-12: **Wrap-up.** Wave 1 (M1.1–M1.7) is complete and merged into `feat/rust-rewrite`
+  (`4971888` + M1.7 merge `44cbe19`); the tree is green and pushable. Remaining work is parked for
+  a next session: **M1.8** (git plugin on gix — fill `bundled::REGISTRY` with
+  `plugins/git/dist/{plugin.toml,git.wasm}`; the two spike shims are the reference implementations),
+  **M1.9** (exec fallback behind `backend = "exec"`), **M1.10** (plugin-authoring docs + real-scan
+  smoke). The Python tree still lives on `main` (`aca128e`); `feat/rust-rewrite` has not been
+  merged there or pushed.

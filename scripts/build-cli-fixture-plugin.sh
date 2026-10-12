@@ -15,15 +15,23 @@ cd "$root"
 
 fixture_dir="crates/backupcrawl-cli/tests/fixtures/detectors/dotbak"
 
-bash scripts/build-example-plugin.sh "$@"
-
-target_dir="${CARGO_TARGET_DIR:-$root/target}"
+# The committed fixture is the release component; default to it so a bare
+# invocation cannot silently overwrite it with a much larger debug blob.
+build_args=("$@")
 profile="debug"
 for arg in "$@"; do
     if [[ "$arg" == "--release" ]]; then
         profile="release"
     fi
 done
+if [[ "$profile" != "release" ]]; then
+    build_args+=("--release")
+    profile="release"
+fi
+
+bash scripts/build-example-plugin.sh "${build_args[@]}"
+
+target_dir="${CARGO_TARGET_DIR:-$root/target}"
 
 built="$target_dir/wasm32-wasip1/$profile/backupcrawl_plugin_example.wasm"
 dest="$fixture_dir/dotbak.wasm"
