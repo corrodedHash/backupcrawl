@@ -31,7 +31,7 @@ Integration branch: `feat/rust-rewrite` in `/run/opencode-agent/coding/worktrees
 | M1.2 SDK | `worktrees/m1-sdk` | `feat/m1.2-plugin-sdk` | done, merged as `efb468c` |
 | M1.3 manifest/discovery | `worktrees/m1-manifest` | `feat/m1.3-manifest-discovery` | done, merged as `d468f46` |
 | M1.4 host runtime | `worktrees/m1-host` (to create) | `feat/m1.4-wasm-host` | not started |
-| M1.5 trust flow | `worktrees/m1-trust` (to create) | `feat/m1.5-trust-flow` | not started |
+| M1.5 trust flow | `worktrees/m1-trust` | `feat/m1.5-trust-flow` | done, merged as `10a5529` |
 | M1.8 git plugin | `worktrees/m1-git` (to create) | `feat/m1.8-git-plugin` | not started |
 | M1.6 walker integration | `worktrees/m1-integration` (to create) | `feat/m1.6-walker-integration` | not started |
 | M1.9 git exec fallback | `worktrees/m1-git-exec` (to create) | `feat/m1.9-git-exec-fallback` | not started |
@@ -154,3 +154,10 @@ with `CARGO_TARGET_DIR`, and a final-report requirement (commits, evidence, devi
   `--plugin-dir` plumbing and consume `discovery::discover`/`PluginSource::Bundled`; M1.5 owns
   manifest hashing/trust and bundled auto-trust. Root `Cargo.lock`/`Cargo.toml` and
   `crates/backupcrawl-host/src/lib.rs` are the shared conflict points for later tasks.
+- 2026-10-12: M1.5 (trust flow) merged into `feat/rust-rewrite` (`10a5529`); acceptance green
+  (`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --workspace`,
+  82 tests). The `trust` module hashes raw `plugin.toml` bytes (sha256), auto-trusts bundled
+  plugins without prompting, renders capabilities with `exec` first and `fs: read /` plainly,
+  and persists hashes into `[plugins.trust]` with `toml_edit` (other tables/comments preserved).
+  `plugins list|info` show trust state; `plugins verify` exits 2 when a third-party plugin is
+  untrusted. M1.6 should reuse the CLI `apply_trust`/`CliPrompt` on the crawl path.
