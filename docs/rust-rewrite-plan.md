@@ -440,6 +440,61 @@ fallback adds `exec = ["git"]`.
 Config: `backend = "gix" | "exec"` (default `gix`), `no-upstream`, `report-ignored`,
 `ignored-mode = "matching" | "all"`, `ancestor-repos`, `recurse-submodules`, `timeout-ms`.
 
+#### M1.7 spike results (target `wasm32-wasip2`, gix 0.89)
+
+The M1.7 feasibility spike lives in `spikes/gix-feasibility/` (a standalone Cargo workspace excluded
+from the main workspace). It builds a `cargo-component` 0.21.1 component for `wasm32-wasip2` that
+inspects one repository with **gix 0.89.0** (`default-features = false`, features `basic`, `status`,
+`sha1`) through a read-only `/` preopen, and runs it on wasmtime 49 with empty env. All 16 git-CLI
+fixture tests pass and reproduce the porcelain-v2 semantics of this section (clean, dirty
+modified+untracked, ahead, behind, no upstream, detached HEAD, unborn, linked worktree, bare,
+ignored `--ignored=matching`, nested repository, ancestor discovery, staged rename, merge conflict,
+packed objects/refs, non-repository). APIs used: `gix::discover_opts`, `repo.head`,
+`repo.branch_remote_tracking_ref_name`, `repo.merge_base`, `repo.rev_walk(..).with_hidden(..)`,
+`repo.index_or_empty`, `repo.status(..)` with `UntrackedFiles::Files` and
+`emit_ignored(Matching)`, plus conflict stages read from the index.
+
+**Required shims / adaptations** (all under `spikes/gix-feasibility/`, wired in via
+`[patch.crates-io]`):
+
+- **`memmap2` shim** (`vendor/memmap2-shim`): gix 0.89 uses `memmap2` unconditionally (index,
+  loose objects, packs, packed refs) and `memmap2` has no wasm backend. Mapping becomes an eager
+  read into a `Vec<u8>`, and it must **preserve the file cursor** (real `mmap` never moves it):
+  `gix_index::File::at()` maps the index and then hashes it from the same handle. Caveat: memory
+  cost ≈ pack/index size (M1's memory cap applies).
+- **`filetime` shim** (`vendor/filetime`): upstream's wasm reader accessors are `unimplemented!()`;
+  the shim implements them via `Metadata::{modified,accessed,created}`. Write paths stay
+  unsupported (the plugin is read-only).
+- **`core.fileMode = false`** on open: WASI exposes no Unix executable bit, so otherwise every
+  tracked `0755` file is reported as modified. Behavior difference: exec-bit-only changes are not
+  detected. The `pacman` plugin has the same gap and closes it with the `stat` host import for
+  mode/uid/gid; the git plugin can adopt that later (M5) if it matters.
+- gix `parallel`/`interrupt`/`command`/`credentials`/`progress`/`mailmap`/`worktree-stream`/
+  `merge`/`blame` stay off; `sha1` is required for racily-clean hashing; zlib-rs enters
+  unconditionally through `gix-zlib`.
+
+**Performance** — synthetic 50 000-file / 100-dir repo (~4 MB index, packed objects); native
+`git status --porcelain=v2` on the same repo is **31 ms**:
+
+| component | host (runner) | small repo, `run` | 50k repo, `run` |
+| --- | --- | --- | --- |
+| debug | debug wasmtime | ~20 ms | ~17.0 s |
+| release | debug wasmtime | ~12 ms | ~14.5 s |
+| release | release wasmtime | ~3–6 ms | ~3.6 s |
+
+Instantiation is < 1.5 ms (release) / ~52 ms (debug). The large-repo cost is dominated by
+wasm↔host call overhead in the untracked/ignored dirwalk and per-file stat/hash, not by gix
+algorithmics. A **release host** is therefore required, and the M1.4 host must cache the compiled
+component (debug artifacts are ~85 MB and take ~90 s to JIT-compile; release is ~3.9 MB).
+
+**Recommendation: `gix`-default for M1.8**, with `backend = "exec"` kept as fallback. gix is
+workable on `wasm32-wasip2` and reproduces the reference semantics; every blocker is covered by a
+small, reviewable shim. M1.8 should vendor/upstream the `memmap2` cursor fix and the `filetime`
+reader shims (the spike's are the reference implementations), open with `core.fileMode=false` and
+document the exec-bit limitation, and consider a size/time guard that falls back to `exec` (or
+reports `unknown`) for very large repositories until the host call overhead is reduced. The
+fallback also covers the exec-bit/symlink fidelity gap and remains selected by config.
+
 ### 7.2 pacman
 
 Managed detection (ownership) — native:

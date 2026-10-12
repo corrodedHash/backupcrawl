@@ -29,10 +29,19 @@ $ ./build.sh --release       # optimized component (for the benchmark)
 - `vendor/memmap2-shim/` — **required on wasm**: gix 0.89 uses `memmap2`
   unconditionally for the index, loose objects, packs and packed refs, and
   `memmap2` has no wasm implementation. The shim replaces mapping with an
-  eager read into memory; see §7.1 for caveats. It is wired in through
-  `[patch.crates-io]` in the workspace `Cargo.toml`.
+  eager read into memory and **preserves the file cursor** (real `mmap` does
+  not move it; `gix_index::File::at()` maps the index and then hashes it from
+  the same handle). See §7.1 for caveats. Wired in through `[patch.crates-io]`.
+- `vendor/filetime/` — **required on wasm**: upstream `filetime`'s wasm reader
+  accessors are `unimplemented!()`, which panics while gix opens the index.
+  The shim implements them via `Metadata::{modified,accessed,created}`; write
+  paths stay unsupported (the plugin is read-only).
 - `gen-large-repo.sh` — synthetic ~50k-file repository generator used by the
   large-repo benchmark.
+
+The plugin also opens the repository with `core.fileMode=false`, because WASI
+exposes no Unix executable bit; without it gix reports every tracked `0755`
+file as modified (see §7.1).
 
 ## Fixture tests
 
