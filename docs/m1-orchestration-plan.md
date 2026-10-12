@@ -32,7 +32,7 @@ Integration branch: `feat/rust-rewrite` in `/run/opencode-agent/coding/worktrees
 | M1.3 manifest/discovery | `worktrees/m1-manifest` | `feat/m1.3-manifest-discovery` | done, merged as `d468f46` |
 | M1.4 host runtime | `worktrees/m1-host` | `feat/m1.4-wasm-host` | done, merged as `69a8680` |
 | M1.5 trust flow | `worktrees/m1-trust` | `feat/m1.5-trust-flow` | done, merged as `10a5529` |
-| M1.8 git plugin | `worktrees/m1-git` (to create) | `feat/m1.8-git-plugin` | not started |
+| M1.8 git plugin | `worktrees/m1-git` | `feat/m1.8-git-plugin` | done, merged as `d7f1519` |
 | M1.6 walker integration | `worktrees/m1-integration` | `feat/m1.6-walker-integration` | done, merged as `bcbdebf` |
 | M1.9 git exec fallback | `worktrees/m1-git-exec` (to create) | `feat/m1.9-git-exec-fallback` | not started |
 | M1.10 wrap-up | `worktrees/m1-wrapup` (to create) | `feat/m1.10-wrap-up` | not started |
@@ -202,3 +202,20 @@ with `CARGO_TARGET_DIR`, and a final-report requirement (commits, evidence, devi
   **M1.9** (exec fallback behind `backend = "exec"`), **M1.10** (plugin-authoring docs + real-scan
   smoke). The Python tree still lives on `main` (`aca128e`); `feat/rust-rewrite` has not been
   merged there or pushed.
+- 2026-10-12: **M1.8 merged** (`d7f1519`). Implemented on `feat/m1.8-git-plugin` (`9e5644e`,
+  `4559f5e`, `0f21fb4`, `6a0002e`, `a0e3311`). Git detector on gix: `.git` dir/file, bare, linked
+  worktree/submodule, ancestor discovery; porcelain-v2 status with `branch.ab`, `no-upstream`,
+  `report-ignored`/`ignored-mode`, detached/unborn, submodules; per-repo status cached in the
+  instance and served to the file hook. The M1.7 shims are vendored at
+  `vendor/{memmap2-shim,filetime}` with `[patch.crates-io]` in the root `Cargo.toml`;
+  `plugins/git/dist/{plugin.toml,git.wasm}` is embedded in `bundled::REGISTRY` (bundled →
+  auto-trusted). Acceptance on the merged tree: `cargo fmt --check`, `cargo clippy --workspace
+  --all-targets -- -D warnings`, `cargo test --workspace` green (162 tests: 23 git golden + 13
+  native git unit); `scripts/build-git-plugin.sh` reproduces `dist/git.wasm` byte-identically
+  (release, `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1`). `backend = "exec"` is parsed and reserved
+  for M1.9 (returns a clear error). Deviations recorded in plan §12: repositories are claimed and
+  pruned by default, descending only when `report-ignored` is on; `timeout-ms` is parsed but not
+  enforced by gix (host fuel/epoch limits protect); `ancestor-repos` defaults true. Note: the
+  earlier "not pushed" wrap-up note is stale — `feat/rust-rewrite` is on `origin` (this branch's
+  merges happened after the remote branch was first pushed); no network in this session, so
+  nothing was pushed now.
