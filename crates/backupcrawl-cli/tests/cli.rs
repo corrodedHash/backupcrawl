@@ -215,9 +215,9 @@ fn plugins_list_shows_sorted_table_and_load_errors() {
     assert_eq!(
         table_rows(&stdout),
         vec![
-            vec!["NAME", "VERSION", "SOURCE", "API", "ENABLED", "TRUSTED"],
-            vec!["alpha", "2.0.0", "explicit", "ok", "yes", "no"],
-            vec!["demo", "0.1.0", "explicit", "ok", "yes", "no"],
+            vec!["NAME", "VERSION", "SOURCE", "API", "ENABLED", "TRUST"],
+            vec!["alpha", "2.0.0", "explicit", "ok", "yes", "new"],
+            vec!["demo", "0.1.0", "explicit", "ok", "yes", "new"],
         ]
     );
 
@@ -252,9 +252,9 @@ fn plugins_list_reflects_enabled_and_trust_config() {
     assert_eq!(
         table_rows(&stdout),
         vec![
-            vec!["NAME", "VERSION", "SOURCE", "API", "ENABLED", "TRUSTED"],
-            vec!["alpha", "2.0.0", "explicit", "ok", "no", "no"],
-            vec!["demo", "0.1.0", "explicit", "ok", "yes", "yes"],
+            vec!["NAME", "VERSION", "SOURCE", "API", "ENABLED", "TRUST"],
+            vec!["alpha", "2.0.0", "explicit", "ok", "no", "new"],
+            vec!["demo", "0.1.0", "explicit", "ok", "yes", "changed"],
         ]
     );
 }
@@ -318,4 +318,189 @@ fn plugins_info_unknown_name_exits_2() {
         .assert()
         .code(2)
         .stderr(predicates::str::contains("not found"));
+}
+
+// --- trust flow ------------------------------------------------------------
+
+/// The `TRUST` cell of the `plugins list` row for `name`.
+fn trust_of(stdout: &str, name: &str) -> String {
+    table_rows(stdout)
+        .into_iter()
+        .find(|cells| cells.first().map(String::as_str) == Some(name))
+        .map(|cells| cells[5].clone())
+        .unwrap_or_else(|| panic!("no row for `{name}` in:\n{stdout}"))
+}
+
+fn config_text(xdg: &Path) -> String {
+    fs::read_to_string(xdg.join("backupcrawl/config.toml")).unwrap()
+}
+
+#[test]
+fn plugins_trust_unknown_hash_via_flag_persists_and_round_trips() {
+    let xdg = tempfile::tempdir().unwrap();
+    let dir = plugins_fixture_dir();
+
+    // Trust on first use: the demo plugin is unknown, so it is not trusted.
+    let stdout = plugins_command(xdg.path())
+        .args(["plugins", "list", "--plugin-dir"])
+        .arg(&dir)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(stdout.stdout).unwrap();
+    assert_eq!(trust_of(&stdout, "demo"), "new");
+    assert_eq!(trust_of(&stdout, "alpha"), "new");
+    assert!(
+        !xdg.path().join("backupcrawl/config.toml").exists(),
+        "an unanswered plugin must not write a config"
+    );
+
+    // Non-interactive confirmation via --trust-plugin.
+    let out = plugins_command(xdg.path())
+        .args(["plugins", "list", "--plugin-dir"])
+        .arg(&dir)
+        .args(["--trust-plugin", "demo"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(trust_of(&stdout, "demo"), "trusted");
+    assert_eq!(trust_of(&stdout, "alpha"), "new");
+
+    // The hash is persisted to the isolated XDG config.
+    let config = config_text(xdg.path());
+    assert!(config.contains("[plugins.trust]"), "{config}");
+    assert!(config.contains("demo = \"sha256:"), "{config}");
+
+    // Round-trip: a later run without the flag still trusts demo.
+    let out = plugins_command(xdg.path())
+        .args(["plugins", "list", "--plugin-dir"])
+        .arg(&dir)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(trust_of(&stdout, "demo"), "trusted");
+}
+
+#[test]
+fn plugins_trust_hash_change_reprompts_until_confirmed() {
+    let xdg = tempfile::tempdir().unwrap();
+    let dir = plugins_fixture_dir();
+    let config_dir = xdg.path().join("backupcrawl");
+    fs::create_dir_all(&config_dir).unwrap();
+    let stale = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+    fs::write(
+        config_dir.join("config.toml"),
+        format!("[plugins.trust]\ndemo = \"{stale}\"\n"),
+    )
+    .unwrap();
+
+    // A trusted-but-changed plugin is reported as `changed`; non-interactively
+    // nothing is persisted and the stale hash survives.
+    let out = plugins_command(xdg.path())
+        .args(["plugins", "list", "--plugin-dir"])
+        .arg(&dir)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(trust_of(&stdout, "demo"), "changed");
+    assert!(config_text(xdg.path()).contains(stale));
+
+    // Confirming with the flag re-persists the current hash.
+    let out = plugins_command(xdg.path())
+        .args(["plugins", "list", "--plugin-dir"])
+        .arg(&dir)
+        .args(["--trust-plugin", "demo"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(trust_of(&stdout, "demo"), "trusted");
+    let config = config_text(xdg.path());
+    assert!(!config.contains(stale), "{config}");
+    assert!(config.contains("demo = \"sha256:"), "{config}");
+
+    // Round-trip.
+    let out = plugins_command(xdg.path())
+        .args(["plugins", "list", "--plugin-dir"])
+        .arg(&dir)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(trust_of(&stdout, "demo"), "trusted");
+}
+
+#[test]
+fn plugins_info_reports_trust_state_and_hash() {
+    let xdg = tempfile::tempdir().unwrap();
+    let out = plugins_command(xdg.path())
+        .args(["plugins", "info", "--plugin-dir"])
+        .arg(plugins_fixture_dir())
+        .args(["--trust-plugin", "demo"])
+        .arg("demo")
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+
+    let fields = info_fields(&stdout);
+    let get = |key: &str| {
+        fields
+            .iter()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value.as_str())
+    };
+    assert_eq!(get("trust"), Some("trusted"));
+    let hash = get("hash").expect("hash field");
+    assert!(hash.starts_with("sha256:"), "got: {hash}");
+
+    // And it was persisted for the round-trip.
+    assert!(config_text(xdg.path()).contains(&format!("demo = \"{hash}\"")));
+}
+
+#[test]
+fn plugins_verify_reports_state_and_fails_on_untrusted() {
+    let xdg = tempfile::tempdir().unwrap();
+    let out = plugins_command(xdg.path())
+        .args(["plugins", "verify", "--plugin-dir"])
+        .arg(plugins_fixture_dir())
+        .output()
+        .unwrap();
+
+    assert_eq!(out.status.code(), Some(2));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("Plugin trust"), "{stdout}");
+    assert!(stdout.contains("sha256:"), "{stdout}");
+    // alpha and demo are untrusted; the command must not have written a config.
+    assert!(String::from_utf8_lossy(&out.stderr).contains("not trusted"));
+    assert!(!xdg.path().join("backupcrawl/config.toml").exists());
+}
+
+#[test]
+fn plugins_verify_succeeds_when_all_plugins_are_trusted() {
+    let xdg = tempfile::tempdir().unwrap();
+    let dir = plugins_fixture_dir();
+
+    // Persist both fixtures via the non-interactive flag, then verify offline.
+    let out = plugins_command(xdg.path())
+        .args(["plugins", "list", "--plugin-dir"])
+        .arg(&dir)
+        .args(["--trust-plugin", "alpha", "--trust-plugin", "demo"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+
+    let out = plugins_command(xdg.path())
+        .args(["plugins", "verify", "--plugin-dir"])
+        .arg(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
 }

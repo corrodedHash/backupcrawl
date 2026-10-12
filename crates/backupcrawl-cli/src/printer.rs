@@ -4,6 +4,7 @@
 //! (styling is disabled automatically when stdout is not a terminal or
 //! `NO_COLOR` is set). The JSON shape is versioned via `"schema": 1`.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -13,6 +14,7 @@ use serde::Serialize;
 use backupcrawl_core::{CrawlResult, PluginReport, Status};
 use backupcrawl_host::discovery::{DiscoveredPlugin, DiscoveryOutcome, PluginSource};
 use backupcrawl_host::manifest::{Manifest, SUPPORTED_CONTRACT};
+use backupcrawl_host::trust::{PluginTrust, TrustState};
 
 use crate::config::PluginsConfig;
 
@@ -63,7 +65,11 @@ pub fn print_json(result: &CrawlResult) -> Result<()> {
 }
 
 /// Prints discovered plugins as an aligned table inside the console panel style.
-pub fn print_plugins_list(outcome: &DiscoveryOutcome, plugins: &PluginsConfig) {
+pub fn print_plugins_list(
+    outcome: &DiscoveryOutcome,
+    plugins: &PluginsConfig,
+    trust: &BTreeMap<String, PluginTrust>,
+) {
     let mut rows: Vec<PluginRow> = outcome
         .plugins
         .iter()
@@ -72,7 +78,7 @@ pub fn print_plugins_list(outcome: &DiscoveryOutcome, plugins: &PluginsConfig) {
             version: plugin.manifest.version().to_owned(),
             source: plugin.source.label().to_owned(),
             enabled: is_enabled(plugins, &plugin.name),
-            trusted: plugins.trust.contains_key(&plugin.name),
+            trust: trust_label(trust, &plugin.name),
         })
         .collect();
     rows.sort_by(|left, right| left.name.cmp(&right.name));
@@ -80,7 +86,7 @@ pub fn print_plugins_list(outcome: &DiscoveryOutcome, plugins: &PluginsConfig) {
     let mut lines = Vec::new();
     lines.push(format!(
         "{:<16} {:<10} {:<8} {:<4} {:<8} {:<8}",
-        "NAME", "VERSION", "SOURCE", "API", "ENABLED", "TRUSTED"
+        "NAME", "VERSION", "SOURCE", "API", "ENABLED", "TRUST"
     ));
     for row in &rows {
         lines.push(format!(
@@ -90,7 +96,7 @@ pub fn print_plugins_list(outcome: &DiscoveryOutcome, plugins: &PluginsConfig) {
             row.source,
             "ok",
             yes_no(row.enabled),
-            yes_no(row.trusted),
+            row.trust,
         ));
     }
     if rows.is_empty() {
@@ -114,8 +120,49 @@ pub fn print_plugins_list(outcome: &DiscoveryOutcome, plugins: &PluginsConfig) {
     }
 }
 
+/// Prints the trust state of every discovered plugin (offline check).
+pub fn print_plugins_verify(outcome: &DiscoveryOutcome, trust: &BTreeMap<String, PluginTrust>) {
+    let mut rows: Vec<PluginRow> = outcome
+        .plugins
+        .iter()
+        .map(|plugin| PluginRow {
+            name: plugin.name.clone(),
+            version: plugin.manifest.version().to_owned(),
+            source: plugin.source.label().to_owned(),
+            enabled: true,
+            trust: trust_label(trust, &plugin.name),
+        })
+        .collect();
+    rows.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "{:<16} {:<10} {:<8} {:<8} HASH",
+        "NAME", "VERSION", "SOURCE", "TRUST"
+    ));
+    for row in &rows {
+        let hash = trust
+            .get(&row.name)
+            .map(|evaluation| evaluation.hash.as_str())
+            .unwrap_or("-");
+        lines.push(format!(
+            "{:<16} {:<10} {:<8} {:<8} {hash}",
+            row.name, row.version, row.source, row.trust
+        ));
+    }
+    if rows.is_empty() {
+        lines.push("(no plugins discovered)".to_owned());
+    }
+
+    println!("{}", render_panel("Plugin trust", &lines));
+
+    for error in &outcome.errors {
+        println!("error: {}", error.display());
+    }
+}
+
 /// Prints the resolved manifest and capabilities of one plugin.
-pub fn print_plugins_info(plugin: &DiscoveredPlugin) {
+pub fn print_plugins_info(plugin: &DiscoveredPlugin, trust: &PluginTrust) {
     let manifest = &plugin.manifest;
     let mut lines = Vec::new();
 
@@ -134,6 +181,22 @@ pub fn print_plugins_info(plugin: &DiscoveredPlugin) {
         manifest.plugin.license.as_deref().unwrap_or("-")
     ));
     lines.push(format!("source:      {}", source_display(plugin)));
+    match effective_label(trust) {
+        "bundled" => {
+            lines.push("trust:       bundled (auto-trusted, covered by the binary)".to_owned())
+        }
+        "changed" => {
+            let previous = match &trust.state {
+                TrustState::Changed { previous } => previous.as_str(),
+                _ => "-",
+            };
+            lines.push(format!(
+                "trust:       changed (stored {previous} no longer matches)"
+            ));
+        }
+        label => lines.push(format!("trust:       {label}")),
+    }
+    lines.push(format!("hash:        {}", trust.hash));
     if let Some(path) = &plugin.manifest_path {
         lines.push(format!("manifest:    {}", path.display()));
     }
@@ -176,7 +239,22 @@ struct PluginRow {
     version: String,
     source: String,
     enabled: bool,
-    trusted: bool,
+    trust: &'static str,
+}
+
+fn trust_label(trust: &BTreeMap<String, PluginTrust>, name: &str) -> &'static str {
+    trust.get(name).map(effective_label).unwrap_or("?")
+}
+
+/// The user-facing trust label: bundled stays bundled, a confirmed plugin is
+/// `trusted` regardless of whether it was new or changed, and an unanswered one
+/// keeps its relative state (`new`/`changed`).
+fn effective_label(evaluation: &PluginTrust) -> &'static str {
+    match evaluation.state {
+        TrustState::Bundled => "bundled",
+        _ if evaluation.trusted => "trusted",
+        _ => evaluation.state.label(),
+    }
 }
 
 fn is_enabled(plugins: &PluginsConfig, name: &str) -> bool {
