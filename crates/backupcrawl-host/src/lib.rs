@@ -15,7 +15,9 @@
 //!
 //! The M1.4 entry points are [`Runtime`] (shared engine/limits/cancellation),
 //! [`WasmDetector`] (one store per detector) and [`CapabilityPolicy`] (the
-//! per-manifest import grants).
+//! per-manifest import grants). [`WasmDetector`] implements the core
+//! [`Detector`] trait; the shared records are re-exported from
+//! `backupcrawl_core::detector` so downstream code has one type set.
 
 mod bindings;
 
@@ -27,8 +29,9 @@ pub mod manifest;
 pub mod runtime;
 pub mod trust;
 
+pub use backupcrawl_core::detector::{
+    Attr, Claim, Detector, DetectorError, DetectorReport, Hooks, LinkInfo, ScanInfo,
+};
 pub use imports::CapabilityPolicy;
 pub use limits::Limits;
-pub use runtime::{
-    Attr, Claim, DetectorError, DetectorReport, LinkInfo, Runtime, ScanInfo, WasmDetector,
-};
+pub use runtime::{Runtime, WasmDetector};

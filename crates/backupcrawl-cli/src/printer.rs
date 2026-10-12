@@ -11,6 +11,7 @@ use anyhow::Result;
 use console::{measure_text_width, style};
 use serde::Serialize;
 
+use backupcrawl_core::detector::DetectorReport;
 use backupcrawl_core::{CrawlResult, PluginReport, Status};
 use backupcrawl_host::discovery::{DiscoveredPlugin, DiscoveryOutcome, PluginSource};
 use backupcrawl_host::manifest::{Manifest, SUPPORTED_CONTRACT};
@@ -21,8 +22,69 @@ use crate::config::PluginsConfig;
 /// Version of the JSON output schema.
 pub const SCHEMA_VERSION: u32 = 1;
 
-/// Prints the crawl result as human-readable panels.
-pub fn print_console(result: &CrawlResult, show_all: bool) {
+/// Run-time status of one detector, rendered in the `plugins:` report line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginRunStatus {
+    /// Detector name.
+    pub name: String,
+    /// Final state for this run.
+    pub state: PluginState,
+}
+
+/// The three states shown in the run report line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginState {
+    /// Ran and reported no errors.
+    Ok,
+    /// Disabled (untrusted, load failure, init failure, circuit breaker).
+    Disabled(String),
+    /// Ran but recorded failed calls.
+    Failed(u32),
+}
+
+impl PluginRunStatus {
+    /// Derives the status of a detector that ran from its lifecycle report.
+    pub fn ran(name: impl Into<String>, report: &DetectorReport) -> Self {
+        let state = if let Some(reason) = &report.disabled {
+            PluginState::Disabled(reason.clone())
+        } else if report.errors > 0 {
+            PluginState::Failed(report.errors)
+        } else {
+            PluginState::Ok
+        };
+        Self {
+            name: name.into(),
+            state,
+        }
+    }
+
+    /// A detector that never ran (untrusted, load failure).
+    pub fn disabled(name: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            state: PluginState::Disabled(reason.into()),
+        }
+    }
+}
+
+/// Renders the `plugins: git ok, ...` run report line.
+pub fn run_line(run: &[PluginRunStatus]) -> String {
+    if run.is_empty() {
+        return "plugins: (none)".to_owned();
+    }
+    let parts = run.iter().map(|status| match &status.state {
+        PluginState::Ok => format!("{} ok", status.name),
+        PluginState::Disabled(reason) => format!("{} disabled ({reason})", status.name),
+        PluginState::Failed(errors) => {
+            let suffix = if *errors == 1 { "" } else { "s" };
+            format!("{} failed ({errors} error{suffix})", status.name)
+        }
+    });
+    format!("plugins: {}", parts.collect::<Vec<_>>().join(", "))
+}
+
+/// Prints the crawl result as human-readable panels plus the run report line.
+pub fn print_console(result: &CrawlResult, show_all: bool, run: &[PluginRunStatus]) {
     let mut panels = Vec::new();
 
     if !result.loose_paths.is_empty() {
@@ -46,9 +108,11 @@ pub fn print_console(result: &CrawlResult, show_all: bool) {
 
     if panels.is_empty() {
         println!("Nothing to report: everything is backed up.");
-        return;
+    } else {
+        println!("{}", panels.join("\n"));
     }
-    println!("{}", panels.join("\n"));
+    println!();
+    println!("{}", run_line(run));
 }
 
 /// Prints the crawl result as versioned JSON.
