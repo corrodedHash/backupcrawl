@@ -6,6 +6,7 @@ members = [
     "crates/backupcrawl-wit",
     "crates/backupcrawl-host",
     "crates/backupcrawl-plugin-sdk",
+    "crates/backupcrawl-plugin-sdk/example-plugin",
     "crates/test-components",
     "plugins/git",
 ]
