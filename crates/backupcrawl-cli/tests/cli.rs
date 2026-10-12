@@ -50,7 +50,7 @@ fn reports_loose_paths_as_versioned_json() {
     touch(&root.join("a.txt"));
     touch(&root.join("sub/b.txt"));
 
-    let json = run_json(root, &[]);
+    let json = run_json(root, &[std::ffi::OsStr::new("--no-plugins")]);
 
     assert_eq!(json["schema"], 1);
     assert_eq!(json["root"], root.to_str().unwrap());
@@ -228,6 +228,8 @@ fn plugins_list_shows_sorted_table_and_load_errors() {
             vec!["NAME", "VERSION", "SOURCE", "API", "ENABLED", "TRUST"],
             vec!["alpha", "2.0.0", "explicit", "ok", "yes", "new"],
             vec!["demo", "0.1.0", "explicit", "ok", "yes", "new"],
+            // The bundled git detector is part of discovery from M1.8 on.
+            vec!["git", "0.1.0", "bundled", "ok", "yes", "bundled"],
         ]
     );
 
@@ -265,6 +267,8 @@ fn plugins_list_reflects_enabled_and_trust_config() {
             vec!["NAME", "VERSION", "SOURCE", "API", "ENABLED", "TRUST"],
             vec!["alpha", "2.0.0", "explicit", "ok", "no", "new"],
             vec!["demo", "0.1.0", "explicit", "ok", "yes", "changed"],
+            // Only `demo` is enabled, so the bundled git detector is disabled.
+            vec!["git", "0.1.0", "bundled", "ok", "no", "bundled"],
         ]
     );
 }
@@ -547,6 +551,7 @@ fn crawl_fixture(root: &Path, xdg: &Path, extra: &[&str]) -> String {
         .arg(root)
         .args(["--plugin-dir"])
         .arg(detectors_fixture_dir())
+        .args(["--plugins", "dotbak"])
         .args(extra)
         .output()
         .unwrap();
@@ -610,7 +615,7 @@ fn crawl_json_carries_per_plugin_entries_and_attrs() {
         .arg(&root)
         .args(["--format", "json", "--plugin-dir"])
         .arg(detectors_fixture_dir())
-        .args(["--trust-plugin", "dotbak"])
+        .args(["--trust-plugin", "dotbak", "--plugins", "dotbak"])
         .output()
         .unwrap();
     assert!(
