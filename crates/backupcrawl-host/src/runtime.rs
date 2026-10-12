@@ -17,13 +17,15 @@
 //! error disables the plugin for the scan, and [`Detector::report`] surfaces
 //! errors, notes and the disable reason for the run report.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use sha2::{Digest, Sha256};
 use wasmtime::component::{Component, HasSelf, Linker};
 use wasmtime::{Config as WasmConfig, Engine, Store, UpdateDeadline};
 use wasmtime_wasi::p2;
@@ -48,6 +50,14 @@ pub struct Runtime {
     limits: Limits,
     cache_root: PathBuf,
     cancel: Arc<AtomicBool>,
+    /// Compiled components keyed by the SHA-256 of their wasm bytes.
+    ///
+    /// Compiling a detector component is expensive (seconds for the git
+    /// component), so the same plugin is compiled once per [`Runtime`] and
+    /// every [`Runtime::instantiate`] reuses the compiled artifact. Without
+    /// this, each instantiation — and each of the many detector instances a
+    /// scan or a test binary builds — pays the full Cranelift cost again.
+    components: Mutex<HashMap<[u8; 32], Arc<Component>>>,
     /// Kept alive for its `Drop`; the watchdog stops when the runtime drops.
     _watchdog: Watchdog,
 }
@@ -88,6 +98,7 @@ impl Runtime {
             limits,
             cache_root: cache_root.into(),
             cancel,
+            components: Mutex::new(HashMap::new()),
             _watchdog: watchdog,
         })
     }
@@ -117,15 +128,17 @@ impl Runtime {
     }
 
     /// Compiles and instantiates `wasm` as a detector named `name`.
+    ///
+    /// The compiled component is cached on the runtime (keyed by the wasm
+    /// bytes), so repeated instantiations of the same plugin — and the many
+    /// instances a scan or test builds — reuse one compilation.
     pub fn instantiate(
         &self,
         wasm: &[u8],
         name: &str,
         policy: CapabilityPolicy,
     ) -> Result<WasmDetector> {
-        let component = Component::new(&self.engine, wasm)
-            .map_err(anyhow::Error::from)
-            .with_context(|| format!("compiling detector `{name}`"))?;
+        let component = self.compiled_component(wasm, name)?;
 
         let state = HostState::new(name, policy, &self.cache_root, &self.limits)?;
         let mut store = Store::new(&self.engine, state);
@@ -148,7 +161,7 @@ impl Runtime {
         });
         store.set_epoch_deadline(1);
 
-        let plugin = Plugin::instantiate(&mut store, &component, &self.linker)
+        let plugin = Plugin::instantiate(&mut store, component.as_ref(), &self.linker)
             .map_err(anyhow::Error::from)
             .with_context(|| format!("instantiating detector `{name}`"))?;
 
@@ -158,6 +171,25 @@ impl Runtime {
             plugin,
             self.limits.clone(),
         ))
+    }
+
+    /// Returns the compiled component for `wasm`, compiling it on first use.
+    fn compiled_component(&self, wasm: &[u8], name: &str) -> Result<Arc<Component>> {
+        let key: [u8; 32] = Sha256::digest(wasm).into();
+        let mut components = self
+            .components
+            .lock()
+            .expect("the component cache mutex is never poisoned");
+        if let Some(component) = components.get(&key) {
+            return Ok(Arc::clone(component));
+        }
+        let component = Arc::new(
+            Component::new(&self.engine, wasm)
+                .map_err(anyhow::Error::from)
+                .with_context(|| format!("compiling detector `{name}`"))?,
+        );
+        components.insert(key, Arc::clone(&component));
+        Ok(component)
     }
 
     /// Instantiates a discovered plugin, deriving its capability policy from the

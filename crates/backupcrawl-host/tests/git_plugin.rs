@@ -14,6 +14,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 use backupcrawl_core::Status;
 use backupcrawl_host::manifest::Manifest;
@@ -26,22 +27,30 @@ const PLUGIN: &str = "git";
 // Harness
 // ---------------------------------------------------------------------------
 
-/// A runtime plus the detector instances instantiated from the bundled git
-/// component.
-struct Harness {
-    runtime: Runtime,
-    /// Kept alive so the per-plugin cache directory outlives the detectors.
-    _cache: tempfile::TempDir,
+/// The runtime shared by every test in this binary.
+///
+/// Compiling the bundled git component takes seconds, so all tests reuse one
+/// [`Runtime`] — and therefore, via the runtime's component cache, one compiled
+/// component. The per-plugin cache directory is kept alive alongside it. (The
+/// git detector declares no `cache` capability, so the shared cache root is
+/// never written concurrently.)
+fn shared() -> &'static (Runtime, tempfile::TempDir) {
+    static SHARED: OnceLock<(Runtime, tempfile::TempDir)> = OnceLock::new();
+    SHARED.get_or_init(|| {
+        let cache = tempfile::tempdir().expect("cache tempdir");
+        let runtime = Runtime::with_cache_root(Limits::default(), cache.path()).expect("runtime");
+        (runtime, cache)
+    })
 }
+
+/// Instantiates detectors from the shared runtime.
+struct Harness;
 
 impl Harness {
     fn new() -> Self {
-        let cache = tempfile::tempdir().expect("cache tempdir");
-        let runtime = Runtime::with_cache_root(Limits::default(), cache.path()).expect("runtime");
-        Self {
-            runtime,
-            _cache: cache,
-        }
+        // Compile the component once, before the test body runs.
+        shared();
+        Self
     }
 
     /// Instantiates and initializes the bundled git detector with `config`.
@@ -52,8 +61,8 @@ impl Harness {
             .expect("git must be in the bundled registry");
         let manifest = Manifest::parse(plugin.manifest).expect("bundled git manifest");
         let policy = CapabilityPolicy::from_manifest(&manifest);
-        let mut detector = self
-            .runtime
+        let mut detector = shared()
+            .0
             .instantiate(plugin.wasm, PLUGIN, policy)
             .expect("instantiate git component");
         detector
