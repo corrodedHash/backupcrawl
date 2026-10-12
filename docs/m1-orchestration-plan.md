@@ -225,3 +225,15 @@ with `CARGO_TARGET_DIR`, and a final-report requirement (commits, evidence, devi
   of 23 times. `cargo test --workspace` 2m07s → 27s; `git_plugin` ~2min → 4.6s. This closes the
   §7.1 M1.4 note that the host must cache the compiled component. Remaining test time is dominated
   by the CLI suite (one process per test, each compiling the bundled component).
+- 2026-10-12 (session wrap-up): M1.8 and the perf fix are merged; `feat/rust-rewrite` is at
+  `89573a1` (plus this note) and green — `cargo fmt --check`, `cargo clippy --workspace
+  --all-targets -- -D warnings`, `cargo test --workspace` → **162 passed**. M1.9 was dispatched
+  twice and both subagent runs were interrupted by the operator before producing any commits;
+  `feat/m1.9-git-exec-fallback` is still at the integration tip and its worktree
+  (`worktrees/m1-git-exec`) is clean, so M1.9 can be dispatched as-is next session (the task text
+  and frozen decisions are unchanged from the M1.8/M1.9 notes above). Remaining: **M1.9** (git exec
+  fallback behind `backend = "exec"`; add `exec = ["git"]`, parity tests) and **M1.10**
+  (plugin-authoring docs + real-scan smoke). `feat/rust-rewrite` is **10 commits ahead of
+  `origin/feat/rust-rewrite`** and not pushed — the sandbox has no network, so push when
+  connectivity returns. Live worktrees: `rust-rewrite` (integration), `m1-git` (M1.8, merged),
+  `m1-git-exec` (M1.9, ready), `host-cache` (perf, merged); branches left in place for review.
