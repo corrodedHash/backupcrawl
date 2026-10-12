@@ -994,6 +994,34 @@ ships on gix by default in this milestone or only behind `backend = "exec"`.
   *Done when:* golden tests against fixture repos (created with the git CLI in tests) cover
   clean/dirty/ahead/no-upstream/ignored/worktree/bare/nested/ancestor cases and reproduce the
   documented porcelain-v2 reference semantics.
+
+  *Implemented (M1.8, branch `feat/m1.8-git-plugin`):* `plugins/git` now implements the detector
+  on the `gix` backend via the SDK (`bind_detector!` + the native `Detector`/`Host` traits).
+  `backend.rs` is the spike's inspection code extended to collect the dirty/ignored *paths* (not
+  just counts) so the file hook is served from a per-repository cache; `config.rs` validates
+  `backend`/`no-upstream`/`report-ignored`/`ignored-mode`/`ancestor-repos`/`recurse-submodules`/
+  `timeout-ms` (`backend = "exec"` returns a clear "not implemented yet (M1.9)" `init` error).
+  Managed detection covers `.git` directories, `.git` files (linked worktree/submodule), bare
+  repositories (`clean` + `bare = true` + prune) and ancestor repositories (`gix::discover`,
+  lazily on the crawl root). Status is porcelain-v2: dirty wins, `ahead > 0` is `ahead`,
+  otherwise `clean` with `behind` as an attr, no upstream follows `no-upstream` (default
+  `unknown`), detached/unborn are `unknown` with a `reason`, and a changed submodule is `dirty`.
+  The two M1.7 shims are vendored at the workspace root (`vendor/{memmap2-shim,filetime}` with
+  `[patch.crates-io]`, `exclude = ["spikes", "vendor"]`); repositories open with
+  `core.fileMode = false`. The component is built by `scripts/build-git-plugin.sh` into
+  `plugins/git/dist/{git.wasm,plugin.toml}` and embedded in `bundled::REGISTRY`.
+  **Decision recorded here:** a repository is claimed as one entry and pruned by default (the
+  Python behavior and the cheap case); with `report-ignored = true` the claim does not prune,
+  `.git` is claimed and pruned as metadata, and the file hook reports ignored paths and the
+  per-file status from the cache. This reconciles §6's "prune = false + file hook served from
+  its per-repo cache" with the default single-entry behavior. `timeout-ms` is parsed but not
+  enforced by the gix backend (the `interrupt` feature is off; host fuel/epoch limits are the
+  protection) and is reserved for the M1.9 exec backend. Golden tests: 23 cases in
+  `crates/backupcrawl-host/tests/git_plugin.rs`, driving the built component through
+  `Runtime`/`WasmDetector` against git-CLI fixtures (clean/dirty/ahead/behind/no-upstream/
+  detached/unborn/worktree/bare/ignored matching+all/nested/ancestor/staged-rename/conflict/
+  packed/submodule/non-repo), plus 12 native unit tests for config and decision logic.
+  `cargo fmt --check`, clippy `-D warnings` and `cargo test --workspace` are green.
 - **M1.9 git exec fallback (behind `backend = "exec"`).** Parse `git status --porcelain=v2
   --branch --ignored=matching` and `for-each-ref` exactly as specified in §7.1, run with
   `GIT_OPTIONAL_LOCKS=0`, disabled when the `git` binary is missing; outputs match the gix

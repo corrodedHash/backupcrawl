@@ -11,8 +11,9 @@ members = [
     "plugins/git",
 ]
 # The gix feasibility spike (M1.7) is a standalone workspace with its own lockfile
-# and a wasm component crate; keep it out of the main workspace.
-exclude = ["spikes"]
+# and a wasm component crate; keep it out of the main workspace. `vendor/` holds
+# the `[patch.crates-io]` shims used to build gix for wasm32-wasip2 (M1.8).
+exclude = ["spikes", "vendor"]
 
 [workspace.package]
 version = "0.3.0"
@@ -31,7 +32,13 @@ clap = { version = "4", features = ["derive"] }
 console = "0.15"
 dirs = "6"
 env_logger = "0.11"
-gix = "0.89"
+# gix 0.89 without `mmap`/`parallel`/`interrupt`/`command`/`credentials`:
+# `default-features = false` drops `max-performance-safe` (which enables
+# `parallel` and pack caches). `status` pulls `dirwalk` -> `attributes` ->
+# `excludes`; `basic` pulls `revision` (for `merge_base`) and `index`; `sha1`
+# hashes racily-clean worktree files while comparing them to the index.
+# gix uses `memmap2` and `filetime` unconditionally; both are patched below.
+gix = { version = "0.89", default-features = false, features = ["basic", "status", "sha1"] }
 globset = "0.4"
 hex = "0.4"
 libc = "0.2"
@@ -51,3 +58,12 @@ wasmtime-wasi = "49.0"
 wit-bindgen = "0.41"
 # wit-parser matches the generation used by wasmtime 49's `bindgen!`.
 wit-parser = "0.258"
+
+# gix 0.89 uses `memmap2` unconditionally (index, loose objects, packs, packed
+# refs) and `memmap2` has no wasm implementation; `filetime`'s wasm reader
+# accessors are `unimplemented!()`. Both are vendored shims (the M1.7 spike's
+# reference implementations) so the git detector can run on wasm32-wasip2.
+# See docs/rust-rewrite-plan.md §7.1 "M1.7 spike results".
+[patch.crates-io]
+memmap2 = { path = "vendor/memmap2-shim" }
+filetime = { path = "vendor/filetime" }
