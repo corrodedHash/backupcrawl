@@ -28,4 +28,9 @@ fi
     cd component
     cargo component build --target wasm32-wasip2 "${profile[@]}"
 )
+# `default_component_path` points at the debug artifact; for a release build,
+# point the tests at the matching release component instead.
+if [ "${#profile[@]}" -ne 0 ]; then
+    export GIX_SPIKE_COMPONENT="$CARGO_TARGET_DIR/wasm32-wasip2/release/gix_feasibility.wasm"
+fi
 cargo test "$@"
