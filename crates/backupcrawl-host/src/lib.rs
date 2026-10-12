@@ -1,9 +1,8 @@
 //! wasmtime-based plugin host.
 //!
-//! This crate is scaffolding as of M1.1; the modules land with later M1 tasks
-//! and must not be implemented before their task starts:
+//! Module status by M1 task:
 //!
-//! - `manifest`, `discovery` and `bundled` — M1.3: `plugin.toml` parsing,
+//! - [`manifest`], [`discovery`] and [`bundled`] — M1.3: `plugin.toml` parsing,
 //!   plugin discovery order and the embedded registry.
 //! - `runtime`, `imports` and `limits` — M1.4: wasmtime instantiation, host
 //!   imports (`stat`/`exec`/`cache`/`http`/`log`) and resource limits.
@@ -13,3 +12,5 @@
 //!
 //! The WIT contract lives in `crates/backupcrawl-wit/wit`; the host generates
 //! its bindings from there with [`wasmtime::component::bindgen!`].
+
+pub mod manifest;
