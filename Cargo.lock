@@ -191,12 +191,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "backupcrawl-plugin-example"
+version = "0.3.0"
+dependencies = [
+ "backupcrawl-plugin-sdk",
+]
+
+[[package]]
 name = "backupcrawl-plugin-git"
 version = "0.3.0"
 
 [[package]]
 name = "backupcrawl-plugin-sdk"
 version = "0.3.0"
+dependencies = [
+ "wit-bindgen",
+]
 
 [[package]]
 name = "backupcrawl-test-components"

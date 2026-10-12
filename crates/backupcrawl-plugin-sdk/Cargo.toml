@@ -9,3 +9,7 @@ repository.workspace = true
 description.workspace = true
 
 [dependencies]
+# Pinned to the version cargo-component 0.21.1 generates bindings with; the
+# `bind_detector!` macro re-exports its `generate!` and runtime so plugin crates
+# only depend on this SDK.
+wit-bindgen.workspace = true
