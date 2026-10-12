@@ -1,7 +1,7 @@
 //! End-to-end CLI behavior.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use assert_cmd::Command;
 use serde_json::Value;
@@ -152,4 +152,170 @@ fn invalid_ignore_pattern_exits_2() {
         .assert()
         .code(2)
         .stderr(predicates::str::contains("invalid ignore patterns"));
+}
+
+// --- plugins list / info ---------------------------------------------------
+
+/// Fixture plugin directory shipped with the crate.
+fn plugins_fixture_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/plugins")
+}
+
+/// A `backupcrawl` command with an isolated, empty XDG config home so the
+/// developer's real `~/.config/backupcrawl/plugins` cannot leak into the test.
+fn plugins_command(xdg: &Path) -> Command {
+    let mut cmd = Command::cargo_bin("backupcrawl").unwrap();
+    cmd.env("XDG_CONFIG_HOME", xdg).env("NO_COLOR", "1");
+    cmd
+}
+
+/// Extracts the table rows (lines framed by `│`) as whitespace-split cells.
+fn table_rows(stdout: &str) -> Vec<Vec<String>> {
+    stdout
+        .lines()
+        .filter(|line| line.starts_with('│'))
+        .map(|line| {
+            line.trim_matches(|ch| ch == '│' || ch == ' ')
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect()
+        })
+        .collect()
+}
+
+/// Extracts `key: value` fields from an info panel.
+fn info_fields(stdout: &str) -> Vec<(String, String)> {
+    stdout
+        .lines()
+        .filter(|line| line.starts_with('│'))
+        .filter_map(|line| {
+            line.trim_matches(|ch| ch == '│' || ch == ' ')
+                .split_once(':')
+                .map(|(key, value)| (key.trim().to_owned(), value.trim().to_owned()))
+        })
+        .collect()
+}
+
+#[test]
+fn plugins_list_shows_sorted_table_and_load_errors() {
+    let xdg = tempfile::tempdir().unwrap();
+    let output = plugins_command(xdg.path())
+        .args(["plugins", "list", "--plugin-dir"])
+        .arg(plugins_fixture_dir())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    assert_eq!(
+        table_rows(&stdout),
+        vec![
+            vec!["NAME", "VERSION", "SOURCE", "API", "ENABLED", "TRUSTED"],
+            vec!["alpha", "2.0.0", "explicit", "ok", "yes", "no"],
+            vec!["demo", "0.1.0", "explicit", "ok", "yes", "no"],
+        ]
+    );
+
+    // The bad fixture (api = "3") is reported as a load error below the table.
+    assert!(
+        stdout.contains("plugin `bad` requires API 3"),
+        "got: {stdout}"
+    );
+    assert!(!stdout.contains('\u{1b}'), "unexpected ANSI escapes");
+}
+
+#[test]
+fn plugins_list_reflects_enabled_and_trust_config() {
+    let xdg = tempfile::tempdir().unwrap();
+    let config_dir = xdg.path().join("backupcrawl");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("config.toml"),
+        "[plugins]\nenabled = [\"demo\"]\n\n[plugins.trust]\ndemo = \"sha256:abc\"\n",
+    )
+    .unwrap();
+
+    let output = plugins_command(xdg.path())
+        .args(["plugins", "list", "--plugin-dir"])
+        .arg(plugins_fixture_dir())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    assert_eq!(
+        table_rows(&stdout),
+        vec![
+            vec!["NAME", "VERSION", "SOURCE", "API", "ENABLED", "TRUSTED"],
+            vec!["alpha", "2.0.0", "explicit", "ok", "no", "no"],
+            vec!["demo", "0.1.0", "explicit", "ok", "yes", "yes"],
+        ]
+    );
+}
+
+#[test]
+fn plugins_info_prints_manifest_and_capabilities() {
+    let xdg = tempfile::tempdir().unwrap();
+    let output = plugins_command(xdg.path())
+        .args(["plugins", "info", "--plugin-dir"])
+        .arg(plugins_fixture_dir())
+        .arg("demo")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    // Convenience: the whole panel title is the plugin name.
+    assert!(stdout.contains("╭─ demo "), "got: {stdout}");
+
+    let fields = info_fields(&stdout);
+    let get = |key: &str| {
+        fields
+            .iter()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value.as_str())
+    };
+
+    assert_eq!(get("version"), Some("0.1.0"));
+    assert_eq!(get("api"), Some("1 (backupcrawl:detector@1.0.0)"));
+    assert_eq!(
+        get("description"),
+        Some("Demo detector for CLI golden tests")
+    );
+    assert_eq!(get("license"), Some("MIT"));
+    assert_eq!(get("hooks"), Some("dir, file"));
+    assert_eq!(get("priority"), Some("5"));
+    assert_eq!(get("exec"), Some("demo-tool"));
+    assert_eq!(get("fs"), Some("read / (v1 read-only preopen)"));
+    assert_eq!(get("fs-read"), Some("~/.config/demo (documented intent)"));
+    assert_eq!(get("http"), Some("http://127.0.0.1:9000"));
+    assert_eq!(get("cache"), Some("yes"));
+
+    // `source` carries the resolved directory.
+    let source = get("source").expect("source field");
+    assert!(source.starts_with("explicit ("), "got: {source}");
+    assert!(source.ends_with("/demo)"), "got: {source}");
+}
+
+#[test]
+fn plugins_info_unknown_name_exits_2() {
+    let xdg = tempfile::tempdir().unwrap();
+    plugins_command(xdg.path())
+        .args(["plugins", "info", "--plugin-dir"])
+        .arg(plugins_fixture_dir())
+        .arg("nope")
+        .assert()
+        .code(2)
+        .stderr(predicates::str::contains("not found"));
 }

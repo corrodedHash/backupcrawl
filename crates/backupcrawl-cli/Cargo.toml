@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 backupcrawl-core.workspace = true
+backupcrawl-host = { path = "../backupcrawl-host" }
 anyhow.workspace = true
 clap.workspace = true
 console.workspace = true

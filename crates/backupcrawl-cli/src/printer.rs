@@ -11,6 +11,10 @@ use console::{measure_text_width, style};
 use serde::Serialize;
 
 use backupcrawl_core::{CrawlResult, PluginReport, Status};
+use backupcrawl_host::discovery::{DiscoveredPlugin, DiscoveryOutcome, PluginSource};
+use backupcrawl_host::manifest::{Manifest, SUPPORTED_CONTRACT};
+
+use crate::config::PluginsConfig;
 
 /// Version of the JSON output schema.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -56,6 +60,167 @@ pub fn print_json(result: &CrawlResult) -> Result<()> {
     };
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
+}
+
+/// Prints discovered plugins as an aligned table inside the console panel style.
+pub fn print_plugins_list(outcome: &DiscoveryOutcome, plugins: &PluginsConfig) {
+    let mut rows: Vec<PluginRow> = outcome
+        .plugins
+        .iter()
+        .map(|plugin| PluginRow {
+            name: plugin.name.clone(),
+            version: plugin.manifest.version().to_owned(),
+            source: plugin.source.label().to_owned(),
+            enabled: is_enabled(plugins, &plugin.name),
+            trusted: plugins.trust.contains_key(&plugin.name),
+        })
+        .collect();
+    rows.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "{:<16} {:<10} {:<8} {:<4} {:<8} {:<8}",
+        "NAME", "VERSION", "SOURCE", "API", "ENABLED", "TRUSTED"
+    ));
+    for row in &rows {
+        lines.push(format!(
+            "{:<16} {:<10} {:<8} {:<4} {:<8} {:<8}",
+            row.name,
+            row.version,
+            row.source,
+            "ok",
+            yes_no(row.enabled),
+            yes_no(row.trusted),
+        ));
+    }
+    if rows.is_empty() {
+        lines.push("(no plugins discovered)".to_owned());
+    }
+
+    println!("{}", render_panel("Plugins", &lines));
+
+    // Warnings and load errors go below the table so a long diagnostic does not
+    // stretch the table's box.
+    for plugin in &outcome.plugins {
+        for warning in &plugin.warnings {
+            println!("warning: {}: {warning}", plugin.name);
+        }
+    }
+    for warning in &outcome.warnings {
+        println!("warning: {warning}");
+    }
+    for error in &outcome.errors {
+        println!("error: {}", error.display());
+    }
+}
+
+/// Prints the resolved manifest and capabilities of one plugin.
+pub fn print_plugins_info(plugin: &DiscoveredPlugin) {
+    let manifest = &plugin.manifest;
+    let mut lines = Vec::new();
+
+    lines.push(format!("name:        {}", manifest.name()));
+    lines.push(format!("version:     {}", manifest.version()));
+    lines.push(format!(
+        "api:         {} ({SUPPORTED_CONTRACT})",
+        plugin.api()
+    ));
+    lines.push(format!(
+        "description: {}",
+        manifest.plugin.description.as_deref().unwrap_or("-")
+    ));
+    lines.push(format!(
+        "license:     {}",
+        manifest.plugin.license.as_deref().unwrap_or("-")
+    ));
+    lines.push(format!("source:      {}", source_display(plugin)));
+    if let Some(path) = &plugin.manifest_path {
+        lines.push(format!("manifest:    {}", path.display()));
+    }
+    if let Some(path) = &plugin.wasm_path {
+        lines.push(format!("wasm:        {}", path.display()));
+    }
+
+    lines.push(String::new());
+    lines.push(format!("hooks:       {}", hooks_display(manifest)));
+    lines.push(format!("priority:    {}", manifest.hooks.priority));
+
+    lines.push(String::new());
+    lines.push("capabilities:".to_owned());
+    lines.push(format!(
+        "  exec: {}",
+        list_or_none(&manifest.capabilities.exec)
+    ));
+    // v1 always grants a read-only `/` preopen; `fs-read` is documented intent.
+    lines.push("  fs: read / (v1 read-only preopen)".to_owned());
+    lines.push(format!(
+        "  fs-read: {} (documented intent)",
+        list_or_none(&manifest.capabilities.fs_read)
+    ));
+    lines.push(format!(
+        "  http: {}",
+        list_or_none(&manifest.capabilities.http)
+    ));
+    lines.push(format!("  cache: {}", yes_no(manifest.capabilities.cache)));
+
+    for warning in &plugin.warnings {
+        lines.push(format!("warning: {warning}"));
+    }
+
+    println!("{}", render_panel(manifest.name(), &lines));
+}
+
+/// One row of `plugins list`.
+struct PluginRow {
+    name: String,
+    version: String,
+    source: String,
+    enabled: bool,
+    trusted: bool,
+}
+
+fn is_enabled(plugins: &PluginsConfig, name: &str) -> bool {
+    plugins.enabled.is_empty() || plugins.enabled.iter().any(|enabled| enabled == name)
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
+}
+
+fn list_or_none(items: &[String]) -> String {
+    if items.is_empty() {
+        "(none)".to_owned()
+    } else {
+        items.join(", ")
+    }
+}
+
+fn hooks_display(manifest: &Manifest) -> String {
+    let mut hooks = Vec::new();
+    if manifest.hooks.dir {
+        hooks.push("dir");
+    }
+    if manifest.hooks.file {
+        hooks.push("file");
+    }
+    if manifest.hooks.symlink {
+        hooks.push("symlink");
+    }
+    if hooks.is_empty() {
+        "(none)".to_owned()
+    } else {
+        hooks.join(", ")
+    }
+}
+
+fn source_display(plugin: &DiscoveredPlugin) -> String {
+    if plugin.source == PluginSource::Bundled {
+        return "bundled (embedded)".to_owned();
+    }
+    match &plugin.source_dir {
+        Some(dir) => format!("{} ({})", plugin.source.label(), dir.display()),
+        None => plugin.source.label().to_owned(),
+    }
 }
 
 #[derive(Serialize)]

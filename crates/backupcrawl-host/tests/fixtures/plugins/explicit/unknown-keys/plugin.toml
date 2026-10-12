@@ -1,0 +1,9 @@
+[plugin]
+name = "unknown-keys"
+version = "0.2.0"
+api = "1"
+homepage = "https://example.com"
+
+[hooks]
+file = true
+files = true
