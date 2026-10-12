@@ -706,9 +706,14 @@ buggy or malicious. The host protects the machine.
   <name>` prints granted programs, and the trust prompt lists `exec` grants first.
 - **http** is allowlisted by scheme/host/port/path-prefix; default localhost-only; responses are
   size-capped. No redirects to non-allowlisted hosts.
-- **Trust on first use:** manifests are hashed (sha256). Unknown plugin → interactive prompt
-  (prints capabilities + hash) or `--trust-plugin`; the hash is written to `~/.config/backupcrawl/
-  config.toml`. Hash change → prompt again. Optional minisign/sigstore verification later.
+- **Trust on first use:** manifests are hashed (sha256). Unknown third-party plugin → interactive
+  prompt (prints capabilities + hash) or `--trust-plugin=NAME` for non-interactive use; the hash
+  is written to `~/.config/backupcrawl/config.toml` (`[plugins.trust]`, plugin name → hash). Hash
+  change → prompt again. **Bundled plugins are auto-trusted**: they ship inside the binary and are
+  covered by its integrity, so requiring a prompt would only train users to click through it; they
+  are still hashed for display. The prompt is only shown on a terminal; piped input declines
+  rather than blocking, so a run without `--trust-plugin` simply reports the plugin as untrusted.
+  Optional minisign/sigstore verification later.
 - **Resource limits** protect against accidental infinite loops and memory bombs (section 9).
 - **Known residual risk:** a malicious detector can exfiltrate any file it is allowed to read
   through the `http` grant (e.g. syncthing's localhost API) or by writing it into an `exec` child's
@@ -878,6 +883,13 @@ ships on gix by default in this milestone or only behind `backend = "exec"`.
   third-party plugins always prompt until trusted; §10 is updated accordingly.
   *Done when:* tests cover the unknown-hash path (non-interactive via flag), hash-change
   re-prompt and trust-list round-trip; bundled auto-trust is documented.
+  *Implemented (M1.5, branch `feat/m1.5-trust-flow`):* `backupcrawl-host::trust` hashes the raw
+  `plugin.toml` bytes (sha256, canonical `sha256:<hex>`), evaluates `Bundled`/`Trusted`/`Unknown`/
+  `Changed` against `[plugins.trust]`, renders the prompt (exec first, `fs: read /`, http/cache,
+  hash) and persists via `toml_edit` so unrelated tables and comments survive.
+  `plugins list` shows the computed trust column, `plugins info` the state and hash, and
+  `plugins verify` is an offline read-only check that exits 2 when a third-party plugin is
+  untrusted. `--trust-plugin=NAME` is repeatable; crawl-level plumbing is M1.6.
 - **M1.6 Detector façade + walker integration.** `Detector` trait in core (`init`, `check_dir`,
   `check_file`, `check_symlink`, `finish`) with `WasmDetector` in the host and a native
   `FixtureDetector` for core tests; the walker asks detectors in priority order, the first
