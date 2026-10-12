@@ -12,8 +12,14 @@ fn touch(path: &Path) {
 }
 
 fn run_json(root: &Path, extra: &[&std::ffi::OsStr]) -> Value {
+    // Isolate the XDG dirs so plugins/trust/cache of the developer's machine
+    // cannot leak into the crawl.
+    let xdg = tempfile::tempdir().unwrap();
     let output = Command::cargo_bin("backupcrawl")
         .unwrap()
+        .env("XDG_CONFIG_HOME", xdg.path().join("config"))
+        .env("XDG_CACHE_HOME", xdg.path().join("cache"))
+        .env("NO_COLOR", "1")
         .arg(root)
         .arg("--format")
         .arg("json")
@@ -61,8 +67,12 @@ fn console_output_has_panels_without_ansi_when_piped() {
     let root = tmp.path();
     touch(&root.join("a.txt"));
 
+    let xdg = tempfile::tempdir().unwrap();
     let output = Command::cargo_bin("backupcrawl")
         .unwrap()
+        .env("XDG_CONFIG_HOME", xdg.path().join("config"))
+        .env("XDG_CACHE_HOME", xdg.path().join("cache"))
+        .env("NO_COLOR", "1")
         .arg(root)
         .output()
         .unwrap();
@@ -502,5 +512,224 @@ fn plugins_verify_succeeds_when_all_plugins_are_trusted() {
         "stdout: {}\nstderr: {}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+// --- crawl with detectors --------------------------------------------------
+
+/// Loadable detector fixture directory (a real wasm component + manifest).
+fn detectors_fixture_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/detectors")
+}
+
+/// A crawl command with isolated XDG config/cache dirs so trust, the user plugin
+/// directory and the persistent cache cannot leak between tests.
+fn crawl_command(xdg: &Path) -> Command {
+    let mut cmd = Command::cargo_bin("backupcrawl").unwrap();
+    cmd.env("XDG_CONFIG_HOME", xdg.join("config"))
+        .env("XDG_CACHE_HOME", xdg.join("cache"))
+        .env("NO_COLOR", "1");
+    cmd
+}
+
+/// A tree exercising a pruned directory claim, a file claim and loose subtrees.
+fn fixture_tree(root: &Path) {
+    touch(&root.join("plain.txt"));
+    touch(&root.join("notes.txt.bak"));
+    touch(&root.join("marked/.dotbak"));
+    touch(&root.join("marked/inner.txt"));
+    touch(&root.join("loose/a.txt"));
+}
+
+/// Runs the fixture detector and returns the console stdout.
+fn crawl_fixture(root: &Path, xdg: &Path, extra: &[&str]) -> String {
+    let output = crawl_command(xdg)
+        .arg(root)
+        .args(["--plugin-dir"])
+        .arg(detectors_fixture_dir())
+        .args(extra)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+#[test]
+fn crawl_runs_a_fixture_detector_and_prints_panels_and_run_line() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("tree");
+    fixture_tree(&root);
+    let xdg = tempfile::tempdir().unwrap();
+
+    let stdout = crawl_fixture(&root, xdg.path(), &["--trust-plugin", "dotbak"]);
+
+    // A per-plugin panel with the dirty file claim.
+    assert!(stdout.contains("╭─ dotbak "), "got:\n{stdout}");
+    assert!(
+        stdout.contains(&format!("[Dirty] {}", root.join("notes.txt.bak").display())),
+        "got:\n{stdout}"
+    );
+    // The pruned `marked` directory is a clean claim, hidden without `--all`.
+    assert!(
+        !stdout.contains(&format!("[Clean] {}", root.join("marked").display())),
+        "got:\n{stdout}"
+    );
+    // Loose output plus the run report line.
+    assert!(stdout.contains("Not backed up"), "got:\n{stdout}");
+    assert!(stdout.contains("plugins: dotbak ok"), "got:\n{stdout}");
+    assert!(!stdout.contains('\u{1b}'), "unexpected ANSI escapes");
+}
+
+#[test]
+fn crawl_all_shows_clean_directory_claims() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("tree");
+    fixture_tree(&root);
+    let xdg = tempfile::tempdir().unwrap();
+
+    let stdout = crawl_fixture(&root, xdg.path(), &["--all", "--trust-plugin", "dotbak"]);
+
+    assert!(
+        stdout.contains(&format!("[Clean] {}", root.join("marked").display())),
+        "got:\n{stdout}"
+    );
+}
+
+#[test]
+fn crawl_json_carries_per_plugin_entries_and_attrs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("tree");
+    fixture_tree(&root);
+    let xdg = tempfile::tempdir().unwrap();
+
+    let output = crawl_command(xdg.path())
+        .arg(&root)
+        .args(["--format", "json", "--plugin-dir"])
+        .arg(detectors_fixture_dir())
+        .args(["--trust-plugin", "dotbak"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert_eq!(json["schema"], 1);
+    let plugins = json["plugins"].as_array().unwrap();
+    assert_eq!(plugins.len(), 1, "{json:#}");
+    assert_eq!(plugins[0]["plugin"], "dotbak");
+
+    let entries = plugins[0]["entries"].as_array().unwrap();
+    let dirty = entries
+        .iter()
+        .find(|entry| entry["status"] == "dirty")
+        .expect("dirty entry");
+    assert!(dirty["path"].as_str().unwrap().ends_with("notes.txt.bak"));
+    assert_eq!(dirty["attrs"]["reason"], "backup-suffix");
+
+    let clean = entries
+        .iter()
+        .find(|entry| entry["status"] == "clean")
+        .expect("clean entry");
+    assert!(clean["path"].as_str().unwrap().ends_with("/marked"));
+    assert_eq!(clean["attrs"]["marker"], ".dotbak");
+
+    let loose = loose_paths(&json);
+    assert!(loose.contains(&root.join("plain.txt").display().to_string()));
+    assert!(loose.contains(&root.join("loose").display().to_string()));
+    assert!(
+        !loose.iter().any(|path| path.ends_with("inner.txt")),
+        "pruned subtree leaked into loose paths: {loose:?}"
+    );
+}
+
+#[test]
+fn crawl_no_plugins_leaves_everything_loose() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("tree");
+    fixture_tree(&root);
+    let xdg = tempfile::tempdir().unwrap();
+
+    let output = crawl_command(xdg.path())
+        .arg(&root)
+        .args(["--format", "json", "--plugin-dir"])
+        .arg(detectors_fixture_dir())
+        .args(["--no-plugins"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert!(json["plugins"].as_array().unwrap().is_empty());
+    let loose = loose_paths(&json);
+    assert!(loose.contains(&root.join("notes.txt.bak").display().to_string()));
+    assert!(loose.contains(&root.join("plain.txt").display().to_string()));
+    assert!(loose.contains(&root.join("loose").display().to_string()));
+    assert!(loose.contains(&root.join("marked").display().to_string()));
+}
+
+#[test]
+fn crawl_reports_an_untrusted_plugin_as_disabled() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("tree");
+    fixture_tree(&root);
+    let xdg = tempfile::tempdir().unwrap();
+
+    // No `--trust-plugin`, non-interactive stdin: the plugin is declined.
+    let stdout = crawl_fixture(&root, xdg.path(), &[]);
+
+    assert!(
+        stdout.contains("plugins: dotbak disabled (untrusted)"),
+        "got:\n{stdout}"
+    );
+    // Nothing was claimed, so the whole tree is loose.
+    assert!(stdout.contains("Not backed up"), "got:\n{stdout}");
+}
+
+#[test]
+fn crawl_selects_and_orders_detectors() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("tree");
+    touch(&root.join("a.txt"));
+    let xdg = tempfile::tempdir().unwrap();
+
+    // `--plugins` restricts the run; the default order is `hooks.priority`
+    // (demo 5 before alpha 100). Both fixtures are untrusted, so neither runs.
+    let out = crawl_command(xdg.path())
+        .arg(&root)
+        .args(["--plugin-dir"])
+        .arg(plugins_fixture_dir())
+        .args(["--plugins", "demo,alpha"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("plugins: demo disabled (untrusted), alpha disabled (untrusted)"),
+        "got:\n{stdout}"
+    );
+
+    // `[plugins] order` pins alpha first, overriding priority.
+    let config = tmp.path().join("config.toml");
+    fs::write(&config, "[plugins]\norder = [\"alpha\"]\n").unwrap();
+    let out = crawl_command(xdg.path())
+        .arg(&root)
+        .args(["--config"])
+        .arg(&config)
+        .args(["--plugin-dir"])
+        .arg(plugins_fixture_dir())
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("plugins: alpha disabled (untrusted), demo disabled (untrusted)"),
+        "got:\n{stdout}"
     );
 }
