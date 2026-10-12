@@ -141,6 +141,12 @@ Key decisions:
   If WASM ever proves wrong, an out-of-process JSON-RPC detector can implement the same trait
   with the same WIT records (serde to JSON), without touching the crawler.
 
+  > Implementation note (M1.6): the records above (`ScanInfo`, `Claim`/`Attr`, `LinkInfo`,
+  > `DetectorError`) are defined in `backupcrawl-core::detector` and the wasm host re-exports
+  > them, so `WasmDetector` implements the trait with no parallel type set. The trait also
+  > carries an optional `report()` accessor (host error/note accounting for the run report) and
+  > the WIT `claim.attrs` list is folded into `Entry.attrs` for deterministic JSON.
+
 ### Why WASM is still right (and why `exec` is minimized)
 
 WASM gives ABI isolation and a real sandbox for the guest code itself: a detector cannot open
@@ -900,6 +906,22 @@ ships on gix by default in this milestone or only behind `backend = "exec"`.
   the walker keeps skipping symlinks until M2.
   *Done when:* core tests with fixture detectors cover first-claim-wins, prune, claim-then-descend
   and loose-path interaction; CLI golden tests show per-plugin panels and JSON entries.
+
+  *Implemented (M1.6, branch `feat/m1.6-walker-integration`):* the shared records
+  (`ScanInfo`, `Claim`/`Attr`, `LinkInfo`, `DetectorError`, `DetectorReport`, `Hooks`) live in
+  `backupcrawl-core::detector` and the host re-exports them, so `WasmDetector` implements the core
+  `Detector` trait without a parallel type set (the WIT `claim.attrs` list is folded into
+  `Entry.attrs` for deterministic JSON). The walker asks detectors in caller order — manifest
+  `hooks.priority`, overridden by `[plugins] order` — first `Some(claim)` wins, `prune = true`
+  records the claim and stops the descent while `prune = false` records it and continues, and
+  `init`/`finish` bracket the scan; loose collapsing is unchanged. The trait gains an optional
+  `report()` accessor so the walker can build `PluginReport`s from the host's circuit-breaker
+  accounting. The CLI builds detectors from discovery + trust + config + `Runtime`, adds
+  `--plugins`/`--no-plugins`/`--plugin-dir`/`--trust-plugin`, renders per-plugin panels plus the
+  `plugins: git ok, ...` run report line, and keeps `plugins list|info|verify`. Symlinks stay
+  skipped until M2. CLI golden tests use the SDK example component as a committed fixture
+  (`crates/backupcrawl-cli/tests/fixtures/detectors/dotbak`, rebuilt with
+  `scripts/build-cli-fixture-plugin.sh`).
 - **M1.7 gix feasibility spike (timeboxed, ~2 days).** Build a minimal component that uses `gix`
   on `wasm32-wasip2` with mmap/file-locking features disabled; run status and upstream comparison
   on real repositories, including a large one, and measure wall time; record which gix features
