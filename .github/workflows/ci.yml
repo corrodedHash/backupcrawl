@@ -56,3 +56,7 @@ jobs:
         run: |
           scripts/build-test-components.sh
           git diff --exit-code -- crates/backupcrawl-host/tests/fixtures
+      # The SDK example is the authoring-path fixture: it must componentize
+      # with the same cargo-component on every change.
+      - name: Build the SDK example component
+        run: scripts/build-example-plugin.sh
