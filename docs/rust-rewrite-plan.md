@@ -1061,6 +1061,21 @@ ships on gix by default in this milestone or only behind `backend = "exec"`.
   *Done when:* docs updated, `cargo fmt`/clippy/`cargo test` green, and the git panel shows up in
   a real scan.
 
+  *Implemented (M1.10, branch `feat/m1.10-wrap-up`):* the stale README intro ("no detectors are
+  wired yet") is replaced with the plugin architecture and the git detector, and it gains a
+  Plugins section (discovery order, `plugins list|info|verify`, trust), the `[plugins]` config
+  shape and the updated exit-code note. New `docs/plugin-authoring.md` covers the three-question
+  model, crate setup (cdylib + `wit` symlink + `[package.metadata.component]`), the `Detector`
+  trait and `Claim` builders, the `Host` services and the capability that gates each, native
+  testing with `MockHost`, the full `plugin.toml` manifest with its validation rules, the build
+  invocation, and the v1 limitations (`fs-read` informational, `check_symlink`/`check-files`
+  not yet called by the walker). **ABI learning:** cargo-component 0.21.1 accepts both targets —
+  the default is `wasm32-wasip1` (preview1 adapter), and `--target wasm32-wasip2` is also valid
+  and is what the bundled git plugin uses; the SDK crate doc that said "do not pass
+  `--target wasm32-wasip2`" was stale and is corrected. Smoke run: `backupcrawl ~` on the real
+  home directory renders the `git` panel (2 `unknown`, 2 `dirty`, `plugins: git ok`), and
+  `plugins list`/`plugins info git` show the bundled auto-trusted manifest.
+
 ## 13. Behavior inventory: carried over vs changed
 
 The Python tool has no users, so nothing here is a compatibility requirement; this is a checklist

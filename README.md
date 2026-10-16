@@ -5,16 +5,21 @@ Detect files which are not backed up.
 `backupcrawl` walks a directory tree and reports what no backup mechanism
 (git, pacman, syncthing, chezmoi, ...) has captured.
 
-This repository is the Rust rewrite: detectors are being ported as WebAssembly
-plugin components. The current state is the core walker and CLI — no detectors
-are wired yet, so every readable path is reported as "not backed up". The
-design and roadmap live in [`docs/rust-rewrite-plan.md`](docs/rust-rewrite-plan.md).
+This repository is the Rust rewrite. Each mechanism is a WebAssembly plugin
+component (wasmtime + the component model) that the binary loads at runtime; the
+core only walks the filesystem, queries the plugins and aggregates the result.
+**git** is the first detector wired up — it reports repository state (clean,
+dirty, unsynced) instead of dumping every tracked file into "not backed up".
+The remaining mechanisms and the roadmap live in
+[`docs/rust-rewrite-plan.md`](docs/rust-rewrite-plan.md); plugin authors should
+read [`docs/plugin-authoring.md`](docs/plugin-authoring.md).
 
 ## Build
 
     cargo build --release
 
-The binary ends up at `target/release/backupcrawl`.
+The binary ends up at `target/release/backupcrawl`. The git detector is embedded
+in the binary, so no plugin directory is required.
 
 ## Usage
 
@@ -24,9 +29,28 @@ The binary ends up at `target/release/backupcrawl`.
     backupcrawl /home --format json
     backupcrawl / --ignore '**/node_modules' --ignore '/proc'
     backupcrawl --config ./backupcrawl.toml
+    backupcrawl --no-plugins            # loose/denied walk only
+    backupcrawl --plugins git,pacman    # run only the named detectors
 
-Console output shows "Not backed up" and "Permission denied" panels; JSON
-output is versioned (`"schema": 1`).
+Console output shows per-plugin panels (Dirty / Unsynced / Unknown, plus Clean
+with `--all`) and the "Not backed up" and "Permission denied" panels; JSON output
+is versioned (`"schema": 1`). A final `plugins: git ok, ...` line summarizes each
+detector's fate.
+
+## Plugins
+
+Detectors are discovered from `--plugin-dir DIR` (repeatable), then
+`$XDG_CONFIG_HOME/backupcrawl/plugins/`, then `/usr/lib/backupcrawl/plugins/`,
+then the plugins bundled inside the binary. The first source to define a name
+wins. Bundled plugins are auto-trusted; a third-party plugin prompts on first use
+and can be trusted non-interactively with `--trust-plugin=NAME`.
+
+    backupcrawl plugins list            # discovered plugins, sources and trust
+    backupcrawl plugins info git        # resolved manifest and capabilities
+    backupcrawl plugins verify          # offline trust check (exit 2 if untrusted)
+
+Writing a detector is covered in
+[`docs/plugin-authoring.md`](docs/plugin-authoring.md).
 
 ## Configuration
 
@@ -35,13 +59,25 @@ output is versioned (`"schema": 1`).
     [ignore]
     paths = ["/proc", "/sys", "/dev", "/run", "**/node_modules"]
 
-`--ignore` globs are appended to the configured ones. A leading `~` in a
-pattern is expanded to your home directory.
+    [plugins]
+    enabled = ["git"]                    # empty = all discovered
+    order   = ["git"]                    # first-claim-wins order
+
+    [plugins.git]
+    no-upstream    = "unknown"           # unknown | ahead | clean
+    report-ignored = false
+    ancestor-repos = true
+    # backend = "exec"                   # git CLI fallback instead of gix
+
+`--ignore` globs are appended to the configured ones. A leading `~` in a pattern
+is expanded to your home directory. Unknown top-level config tables are rejected
+so a typo is not silently ignored.
 
 ## Exit codes
 
-`0` on success, `2` for usage or config errors. Scan results do not change the
-exit code yet (a `--fail-on` mode is planned once detectors exist).
+`0` on success, `2` for usage or config errors (including an untrusted plugin
+under `plugins verify`). Scan results do not change the exit code yet; a
+`--fail-on unbacked|error` mode is deferred until scripts need it.
 
 ## License
 
