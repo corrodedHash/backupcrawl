@@ -17,6 +17,16 @@ pub enum Backend {
     Exec,
 }
 
+impl Backend {
+    /// The config spelling, used in log lines.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Gix => "gix",
+            Self::Exec => "exec",
+        }
+    }
+}
+
 /// What to report for a repository whose HEAD has no upstream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoUpstream {
@@ -52,7 +62,7 @@ pub struct GitConfig {
     pub ancestor_repos: bool,
     /// Whether submodule worktrees are claimed on their own.
     pub recurse_submodules: bool,
-    /// Parsed per-repository timeout budget (reserved; see module docs).
+    /// Per-repository budget in milliseconds; honored by the `exec` backend.
     pub timeout_ms: Option<u64>,
 }
 

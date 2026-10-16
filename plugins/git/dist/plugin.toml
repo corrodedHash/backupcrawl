@@ -17,8 +17,10 @@ priority = 10
 
 [capabilities]
 # The gix backend reads repository data in-process and needs no `exec`; the
-# M1.9 `backend = "exec"` fallback will add ["git"].
-exec = []
+# `backend = "exec"` fallback (M1.9) runs `git status` and `git rev-parse`
+# through the host `exec` import, which this allowlist enables. Nothing runs
+# unless the fallback is selected in `[plugins.git]`.
+exec = ["git"]
 # Documented intent (Appendix A); the v1 host preopens `/` read-only.
 fs-read = []
 http = []
