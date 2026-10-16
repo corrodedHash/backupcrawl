@@ -738,6 +738,12 @@ third-party plugins exist. See open question 4.
   config mtime). `backupcrawl cache clear` for manual control.
 - Limits: wasmtime fuel/epoch interruption (cooperative cancel every ~50 ms), linear memory
   limit (e.g. 256 MiB), exec timeout + output caps (e.g. 64 MiB), HTTP timeout + size cap.
+- Compiled components are cached in two layers: in-memory (keyed by the wasm bytes, one
+  compilation per detector per process) and on disk via wasmtime's component cache
+  (`$XDG_CACHE_HOME/backupcrawl/plugins/_components`). The bundled git component takes ~10 s
+  to JIT-compile in a debug build, so the disk cache is what keeps repeat runs fast; a warm
+  `backupcrawl` run drops from ~10 s to a fraction of a second, and `cargo test --workspace`
+  from ~2.5 min to seconds.
 - `--stats`: per-plugin wall time, exec count, cache hits, errors — makes it visible which
   detector is slow (pacman `-Qkk` will usually be the culprit).
 - Progress display: port `PathTracker` semantics to `indicatif` + `console` (open/close counters,
@@ -1027,6 +1033,27 @@ ships on gix by default in this milestone or only behind `backend = "exec"`.
   `GIT_OPTIONAL_LOCKS=0`, disabled when the `git` binary is missing; outputs match the gix
   backend on the same fixtures.
   *Done when:* parity tests pass for both backends (skipped when `git` is unavailable).
+
+  *Implemented (M1.9, branch `feat/m1.9-git-exec-fallback`):* the backend-neutral records
+  and verdict logic moved to `plugins/git/src/model.rs`; the gix code stays in `backend.rs`
+  and the new `exec.rs` parses porcelain v2 into the same `RepoInspection`, so the two
+  backends share one decision path. The status command is
+  `git -c core.quotePath=false status --porcelain=v2 --branch --untracked-files=all
+  [--ignored=matching]` with an otherwise empty environment plus `GIT_OPTIONAL_LOCKS=0` and
+  `GIT_CONFIG_NOSYSTEM=1`. Three choices make it match gix: `-uall` (gix's
+  `UntrackedFiles::Files` lists individual files, the CLI default collapses an untracked
+  directory), `--ignored=matching` (the same ignored set gix emits; `ignored-mode = all`
+  still uses the host-side parent rule) and C-style path unquoting. Bare repositories read
+  HEAD with `git symbolic-ref` + `git rev-parse --verify` (where `status` cannot run) so the
+  attributes match gix exactly; `timeout-ms` is now honored by this backend. `init` probes
+  `git --version` and disables the plugin for the scan when the program is missing. The
+  manifest declares `exec = ["git"]` (bundled plugins are auto-trusted, and nothing runs
+  unless `backend = "exec"` is selected). Parity tests live in
+  `crates/backupcrawl-host/tests/git_plugin_exec.rs` (13 cases, each observing a shared
+  fixture with both backends and asserting identical directory claims/attributes/prune and
+  file statuses); the git fixture helpers moved to `tests/support/mod.rs`. CI rebuilds
+  `plugins/git/dist/git.wasm` and fails on a stale artifact.
+
 - **M1.10 Wrap-up.** README plugin section and a short plugin-authoring doc (build with
   `cargo component build`, manifest fields, capabilities, testing with the SDK mock); manual
   smoke run of `backupcrawl ~` on a real home directory; plan doc updated with the spike results

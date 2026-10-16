@@ -34,7 +34,7 @@ Integration branch: `feat/rust-rewrite` in `/run/opencode-agent/coding/worktrees
 | M1.5 trust flow | `worktrees/m1-trust` | `feat/m1.5-trust-flow` | done, merged as `10a5529` |
 | M1.8 git plugin | `worktrees/m1-git` | `feat/m1.8-git-plugin` | done, merged as `d7f1519` |
 | M1.6 walker integration | `worktrees/m1-integration` | `feat/m1.6-walker-integration` | done, merged as `bcbdebf` |
-| M1.9 git exec fallback | `worktrees/m1-git-exec` (to create) | `feat/m1.9-git-exec-fallback` | not started |
+| M1.9 git exec fallback | `worktrees/m1-git-exec` (pruned) | `feat/m1.9-git-exec-fallback` | done, merged as `a8e0a11` |
 | M1.10 wrap-up | `worktrees/m1-wrapup` (to create) | `feat/m1.10-wrap-up` | not started |
 
 Wave 1 tasks branch from `feat/rust-rewrite` after M1.1 is merged; wave 2 after wave 1 is
@@ -237,3 +237,15 @@ with `CARGO_TARGET_DIR`, and a final-report requirement (commits, evidence, devi
   `origin/feat/rust-rewrite`** and not pushed — the sandbox has no network, so push when
   connectivity returns. Live worktrees: `rust-rewrite` (integration), `m1-git` (M1.8, merged),
   `m1-git-exec` (M1.9, ready), `host-cache` (perf, merged); branches left in place for review.
+- 2026-10-16: **M1.9 merged** (`a8e0a11`) on `feat/m1.9-git-exec-fallback` (`5458987`, `d132b37`).
+  The exec fallback is implemented behind `backend = "exec"` and parity-tested against gix on
+  the same fixtures (13 cases in `git_plugin_exec.rs`); the records/verdict logic moved to
+  `plugins/git/src/model.rs` and the Manifest declares `exec = ["git"]`. A cross-cutting perf
+  fix landed alongside: wasmtime's **on-disk component cache** (`Runtime::with_cache_dirs`,
+  cache under `<cache_root>/_components`) plus shared test cache directories. `cargo test
+  --workspace` went from ~2.5 min to **~19 s cold** (a single debug JIT compile of the 3.3 MB
+  git component) and **~3.5 s warm** (184 tests); a warm `backupcrawl` run dropped from ~10 s
+  to ~0.24 s. Acceptance on the merged tree: `cargo fmt --check`, `cargo clippy --workspace
+  --all-targets -- -D warnings`, `cargo test --workspace` all green; `scripts/build-git-plugin.sh`
+  reproduces `plugins/git/dist/git.wasm` byte-identically and CI now checks it. Remaining: **M1.10**
+  (plugin-authoring docs + real-scan smoke).
