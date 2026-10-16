@@ -70,10 +70,11 @@
 //! target = { path = "wit", world = "plugin" }
 //! ```
 //!
-//! Build with `cargo component build --release` (cargo-component 0.21.1 builds
-//! `wasm32-wasip1` and componentizes it with the preview1 adapter; the artifact
-//! lands in `<CARGO_TARGET_DIR>/wasm32-wasip1/release/<crate>.wasm`). Do not
-//! pass `--target wasm32-wasip2` to `cargo component build`.
+//! Build with `cargo component build --release`. cargo-component 0.21.1
+//! defaults to `wasm32-wasip1` (componentized with the preview1 adapter), so the
+//! artifact lands in `<CARGO_TARGET_DIR>/wasm32-wasip1/release/<crate>.wasm`;
+//! pass `--target wasm32-wasip2` to build the wasip2 target instead (the bundled
+//! git plugin does this).
 //!
 //! [`bind_detector!`]: crate::bind_detector
 
