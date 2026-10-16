@@ -21,7 +21,7 @@ Every detector answers the same three questions for whatever it manages
 | **Current?** | Does the mechanism's copy match the live content? | `git status`, mtree comparison |
 | **Propagated?** | Has the current state left this machine? | `branch.ab`, syncthing `needFiles` |
 
-The verdict is a [`Status`] on a [`Claim`]: `clean`, `dirty`, `ahead` (rendered
+The verdict is a `Status` on a `Claim`: `clean`, `dirty`, `ahead` (rendered
 as "Unsynced"), `unknown` (managed but the state could not be determined) or
 `ignored` (deliberately excluded: `.gitignore`, `.stignore`). Returning `Ok(None)`
 means "not managed by me"; the first detector that returns `Some(claim)` wins,
@@ -62,8 +62,8 @@ the macro's generated glue refers to `backupcrawl_plugin_sdk::rt`.
 
 ## Writing the detector
 
-Implement the SDK [`Detector`] trait — every method has a default, so override
-only what you need — and end the file with [`bind_detector!`], which emits the
+Implement the SDK `Detector` trait — every method has a default, so override
+only what you need — and end the file with `bind_detector!`, which emits the
 component export glue for the canonical `plugin` world:
 
 ```rust
@@ -113,7 +113,7 @@ bind_detector!(Mine);
 
 Notes:
 
-- [`Claim`] has builders: `Claim::clean()`, `Claim::dirty()`, `Claim::ahead()`,
+- `Claim` has builders: `Claim::clean()`, `Claim::dirty()`, `Claim::ahead()`,
   `Claim::unknown()`, `Claim::ignored()`, plus `.attr(key, value)` and `.prune()`.
   Attributes are free-form and shown in `--all` output / JSON.
 - `check_files` has a default implementation that is exactly N `check_file`
@@ -129,7 +129,7 @@ Notes:
 ## Host services
 
 Detector logic never touches the OS directly. Every privileged operation goes
-through the [`Host`] trait, and the host grants only what the manifest declares:
+through the `Host` trait, and the host grants only what the manifest declares:
 
 | Method | Purpose | Capability |
 | --- | --- | --- |
@@ -149,8 +149,8 @@ prompt print it first.
 
 ## Testing natively (no wasm toolchain)
 
-Because the logic talks to the [`Host`] trait, it runs under plain `cargo test`
-with [`MockHost`]. Stage the responses the detector should see, then assert on
+Because the logic talks to the `Host` trait, it runs under plain `cargo test`
+with `MockHost`. Stage the responses the detector should see, then assert on
 what it did:
 
 ```rust
@@ -276,10 +276,3 @@ $ backupcrawl plugins verify
 - `[config-schema]` is parsed but not enforced; validate your own config in
   `init` and return a `DetectorError` for bad values.
 - `exec` children are not sandboxed; keep the allowlist as small as possible.
-
-[`Claim`]: https://docs.rs/backupcrawl-plugin-sdk
-[`Detector`]: https://docs.rs/backupcrawl-plugin-sdk
-[`Host`]: https://docs.rs/backupcrawl-plugin-sdk
-[`MockHost`]: https://docs.rs/backupcrawl-plugin-sdk
-[`Status`]: https://docs.rs/backupcrawl-plugin-sdk
-[`bind_detector!`]: https://docs.rs/backupcrawl-plugin-sdk
