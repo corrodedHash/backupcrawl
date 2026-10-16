@@ -27,6 +27,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 use wasmtime::component::{Component, HasSelf, Linker};
+use wasmtime::{Cache, CacheConfig};
 use wasmtime::{Config as WasmConfig, Engine, Store, UpdateDeadline};
 use wasmtime_wasi::p2;
 
@@ -69,11 +70,42 @@ impl Runtime {
         Self::with_cache_root(limits, default_cache_root())
     }
 
-    /// Creates a runtime whose per-plugin cache lives under `cache_root`.
+    /// Creates a runtime whose per-plugin cache lives under `cache_root` and
+    /// whose compiled-component cache lives under `cache_root/_components`.
     pub fn with_cache_root(limits: Limits, cache_root: impl Into<PathBuf>) -> Result<Self> {
+        let cache_root = cache_root.into();
+        let component_cache = cache_root.join("_components");
+        Self::with_cache_dirs(limits, cache_root, component_cache)
+    }
+
+    /// Creates a runtime with explicit cache locations.
+    ///
+    /// `cache_root` holds the per-plugin KV caches; `component_cache` holds the
+    /// wasmtime on-disk compilation cache. Keeping them separable lets callers
+    /// (for example tests) isolate per-plugin state while still sharing the
+    /// expensive compiled artifacts.
+    pub fn with_cache_dirs(
+        limits: Limits,
+        cache_root: impl Into<PathBuf>,
+        component_cache: impl Into<PathBuf>,
+    ) -> Result<Self> {
+        let cache_root = cache_root.into();
         let mut config = WasmConfig::new();
         config.consume_fuel(true);
         config.epoch_interruption(true);
+        // Enable wasmtime's on-disk component cache. Compiling the bundled git
+        // component takes seconds in a debug build, and a fresh process (every
+        // `backupcrawl` run, every CLI test) would otherwise pay that cost
+        // again. The cache is keyed by the wasm bytes and the engine
+        // configuration, so a stale or foreign entry is never used. A failure
+        // to open the cache is not fatal: the in-memory cache and recompilation
+        // still work.
+        match Cache::new(component_cache_config(component_cache.into())) {
+            Ok(cache) => {
+                config.cache(Some(cache));
+            }
+            Err(err) => log::warn!("wasmtime on-disk component cache disabled: {err:#}"),
+        }
         let engine = Engine::new(&config)
             .map_err(anyhow::Error::from)
             .context("creating the wasmtime engine")?;
@@ -96,7 +128,7 @@ impl Runtime {
             engine,
             linker,
             limits,
-            cache_root: cache_root.into(),
+            cache_root,
             cancel,
             components: Mutex::new(HashMap::new()),
             _watchdog: watchdog,
@@ -209,6 +241,17 @@ pub fn default_cache_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("backupcrawl")
         .join("plugins")
+}
+
+/// The wasmtime on-disk component cache configuration.
+///
+/// Component compilation is the expensive part of a scan and the entries are
+/// content-addressed, so keeping them around is cheap insurance for the next
+/// run.
+fn component_cache_config(directory: PathBuf) -> CacheConfig {
+    let mut config = CacheConfig::new();
+    config.with_directory(directory);
+    config
 }
 
 /// A wasmtime component instance driving one detector.

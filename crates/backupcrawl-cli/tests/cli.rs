@@ -2,9 +2,42 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use assert_cmd::Command;
 use serde_json::Value;
+
+/// A shared cache directory for the spawned CLI processes.
+///
+/// Every `backupcrawl` run compiles the bundled git component, which takes
+/// seconds in a debug build. Pointing all tests at one `XDG_CACHE_HOME` lets the
+/// wasmtime on-disk component cache serve the compiled artifact to every process
+/// after the first, instead of recompiling per test. `XDG_CONFIG_HOME` stays
+/// per-test so trust and user plugins never leak between tests.
+///
+/// The directory is deliberately the same one the host integration tests use
+/// (`backupcrawl-test-cache`), so the whole workspace warms a single component
+/// cache. The first call compiles the component once, serially, before the
+/// parallel tests spawn their processes.
+fn shared_cache_home() -> &'static Path {
+    static CACHE: OnceLock<PathBuf> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        let dir = std::env::temp_dir().join("backupcrawl-test-cache");
+        fs::create_dir_all(&dir).unwrap();
+        // Warm the component cache once so the parallel tests below do not each
+        // recompile the bundled 3 MB component from a cold cache.
+        let root = tempfile::tempdir().unwrap();
+        let _ = std::process::Command::new(env!("CARGO_BIN_EXE_backupcrawl"))
+            .env("XDG_CACHE_HOME", &dir)
+            .env("XDG_CONFIG_HOME", dir.join("config"))
+            .env("NO_COLOR", "1")
+            .arg(root.path())
+            .arg("--format")
+            .arg("json")
+            .output();
+        dir
+    })
+}
 
 fn touch(path: &Path) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -12,13 +45,14 @@ fn touch(path: &Path) {
 }
 
 fn run_json(root: &Path, extra: &[&std::ffi::OsStr]) -> Value {
-    // Isolate the XDG dirs so plugins/trust/cache of the developer's machine
-    // cannot leak into the crawl.
+    // Isolate the config dir so plugins/trust of the developer's machine cannot
+    // leak into the crawl; the cache dir is shared across tests (see
+    // `shared_cache_home`).
     let xdg = tempfile::tempdir().unwrap();
     let output = Command::cargo_bin("backupcrawl")
         .unwrap()
         .env("XDG_CONFIG_HOME", xdg.path().join("config"))
-        .env("XDG_CACHE_HOME", xdg.path().join("cache"))
+        .env("XDG_CACHE_HOME", shared_cache_home())
         .env("NO_COLOR", "1")
         .arg(root)
         .arg("--format")
@@ -71,7 +105,7 @@ fn console_output_has_panels_without_ansi_when_piped() {
     let output = Command::cargo_bin("backupcrawl")
         .unwrap()
         .env("XDG_CONFIG_HOME", xdg.path().join("config"))
-        .env("XDG_CACHE_HOME", xdg.path().join("cache"))
+        .env("XDG_CACHE_HOME", shared_cache_home())
         .env("NO_COLOR", "1")
         .arg(root)
         .output()
@@ -526,12 +560,13 @@ fn detectors_fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/detectors")
 }
 
-/// A crawl command with isolated XDG config/cache dirs so trust, the user plugin
-/// directory and the persistent cache cannot leak between tests.
+/// A crawl command with an isolated XDG config dir so trust and the user plugin
+/// directory cannot leak between tests. The cache dir is shared across tests so
+/// the bundled component is compiled once (see `shared_cache_home`).
 fn crawl_command(xdg: &Path) -> Command {
     let mut cmd = Command::cargo_bin("backupcrawl").unwrap();
     cmd.env("XDG_CONFIG_HOME", xdg.join("config"))
-        .env("XDG_CACHE_HOME", xdg.join("cache"))
+        .env("XDG_CACHE_HOME", shared_cache_home())
         .env("NO_COLOR", "1");
     cmd
 }
