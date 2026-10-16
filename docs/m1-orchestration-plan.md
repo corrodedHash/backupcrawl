@@ -35,7 +35,7 @@ Integration branch: `feat/rust-rewrite` in `/run/opencode-agent/coding/worktrees
 | M1.8 git plugin | `worktrees/m1-git` | `feat/m1.8-git-plugin` | done, merged as `d7f1519` |
 | M1.6 walker integration | `worktrees/m1-integration` | `feat/m1.6-walker-integration` | done, merged as `bcbdebf` |
 | M1.9 git exec fallback | `worktrees/m1-git-exec` (pruned) | `feat/m1.9-git-exec-fallback` | done, merged as `a8e0a11` |
-| M1.10 wrap-up | `worktrees/m1-wrapup` (to create) | `feat/m1.10-wrap-up` | not started |
+| M1.10 wrap-up | `worktrees/m1-wrapup` (pruned) | `feat/m1.10-wrap-up` | done, merged as `81fa718` |
 
 Wave 1 tasks branch from `feat/rust-rewrite` after M1.1 is merged; wave 2 after wave 1 is
 merged; and so on. Every task is dispatched as a `general` subagent with: the worktree path,
@@ -249,3 +249,17 @@ with `CARGO_TARGET_DIR`, and a final-report requirement (commits, evidence, devi
   --all-targets -- -D warnings`, `cargo test --workspace` all green; `scripts/build-git-plugin.sh`
   reproduces `plugins/git/dist/git.wasm` byte-identically and CI now checks it. Remaining: **M1.10**
   (plugin-authoring docs + real-scan smoke).
+- 2026-10-16: **M1.10 merged** (`81fa718`) on `feat/m1.10-wrap-up` (`81a1d78`). Wrap-up docs:
+  README loses the stale "no detectors are wired yet" intro and gains the plugin architecture,
+  a Plugins section (discovery order, `plugins list|info|verify`, trust), the `[plugins]` config
+  shape and the updated exit-code note; new `docs/plugin-authoring.md` is the full authoring guide
+  (three-question model, crate setup, `Detector`/`Claim`, `Host` capabilities, `MockHost` testing,
+  manifest schema + validation, build, v1 limitations). **ABI learning recorded in plan §12:** the
+  SDK's "do not pass `--target wasm32-wasip2`" note was stale — cargo-component 0.21.1 defaults to
+  `wasm32-wasip1` and also accepts `--target wasm32-wasip2` (what `build-git-plugin.sh` uses);
+  both build successfully. Smoke run: `backupcrawl ~` on the real home directory renders the git
+  panel (2 `unknown`, 2 `dirty`, `plugins: git ok`), warm run ~0.26 s, `plugins list`/`plugins
+  info git` show the bundled auto-trusted manifest. Acceptance on the merged tree: `cargo fmt
+  --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` all
+  green. **M1 is complete**; next is **M2** (pacman plugin + symlink handling). `feat/rust-rewrite`
+  is still not pushed (no network in this session); the M1.10 worktree was pruned.
