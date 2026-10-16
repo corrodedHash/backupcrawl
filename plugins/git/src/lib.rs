@@ -1,13 +1,15 @@
 //! Bundled git detector plugin.
 //!
 //! Answers the three questions of §3 of `docs/rust-rewrite-plan.md` for git
-//! repositories, using the pure-Rust `gix` backend (§7.1, M1.7 spike) so no
-//! `git` process is spawned and the plugin needs no `exec` capability:
+//! repositories. The default backend is pure-Rust `gix` (§7.1, M1.7 spike) so
+//! no `git` process is spawned and the plugin needs no `exec` capability; the
+//! `backend = "exec"` fallback (M1.9) runs `git status --porcelain=v2` through
+//! the host `exec` import for exact exec-bit fidelity.
 //!
 //! * **Managed?** A directory containing a `.git` directory or `.git` file
 //!   (linked worktree/submodule), or a bare repository (`HEAD`, `objects/`,
-//!   `refs/`). The repository enclosing the crawl root is discovered with
-//!   `gix::discover` when `ancestor-repos` is on.
+//!   `refs/`). The repository enclosing the crawl root is discovered (`gix` or
+//!   `git rev-parse --show-toplevel`) when `ancestor-repos` is on.
 //! * **Current?** Porcelain-v2 semantics: any staged/unstaged/renamed/
 //!   conflicted/untracked record is `dirty`; a changed submodule counts as
 //!   `dirty` too.
@@ -30,15 +32,26 @@
 //!
 //! # Config
 //!
-//! `backend` (default `"gix"`; `"exec"` is M1.9 and returns a clear
-//! "not implemented yet" error for now), `no-upstream`, `report-ignored`,
-//! `ignored-mode`, `ancestor-repos`, `recurse-submodules`, `timeout-ms`.
-//! `timeout-ms` is parsed and reserved: the gix backend cannot be interrupted
-//! mid-walk (the `interrupt` feature is off), so the host's fuel/epoch limits
-//! are the real protection and the M1.9 exec backend will honor the budget.
+//! `backend` (`"gix"`, the default, or `"exec"`), `no-upstream`,
+//! `report-ignored`, `ignored-mode`, `ancestor-repos`, `recurse-submodules`,
+//! `timeout-ms`. `timeout-ms` is honored by the `exec` backend (a per-repository
+//! process budget); the gix backend cannot be interrupted mid-walk (the
+//! `interrupt` feature is off), so there the host's fuel/epoch limits are the
+//! real protection.
+//!
+//! # Backends
+//!
+//! * **`gix`** (default): in-process, no `exec` grant, WASI reads through a
+//!   read-only `/` preopen. Ignores the Unix executable bit
+//!   (`core.fileMode = false`), so exec-bit-only changes are invisible.
+//! * **`exec`** (M1.9): `git status --porcelain=v2` through the host `exec`
+//!   import, disabled when the `git` program is missing. Accurate but spawns a
+//!   process per repository; the manifest grants `exec = ["git"]`.
 
 mod backend;
 mod config;
+mod exec;
+mod model;
 
 use std::path::{Path, PathBuf};
 
@@ -46,8 +59,8 @@ use backupcrawl_plugin_sdk::{
     Claim, Detector, DetectorError, Host, LogLevel, ScanInfo, bind_detector,
 };
 
-use backend::{InspectOptions, RepoInspection};
 use config::{Backend, GitConfig, IgnoredMode};
+use model::{InspectOptions, RepoInspection, RepoKind};
 
 /// The git detector's mutable state (one instance per wasm store).
 #[derive(Debug, Default)]
@@ -91,11 +104,19 @@ impl Git {
             })
     }
 
-    /// Opens (or reuses) the repository rooted at `path`.
+    /// The per-repository `exec` timeout, clamped to the WIT `u32`.
+    fn exec_timeout(&self) -> Option<u32> {
+        self.config
+            .timeout_ms
+            .map(|ms| ms.min(u64::from(u32::MAX)) as u32)
+    }
+
+    /// Opens (or reuses) the repository rooted at `path` with the configured
+    /// backend.
     ///
     /// Returns `None` when the repository should not be claimed (a submodule
     /// with `recurse-submodules = false`).
-    fn inspect_at(&mut self, path: &Path) -> Option<RepoInspection> {
+    fn inspect_at(&mut self, path: &Path, host: &mut dyn Host) -> Option<RepoInspection> {
         if let Some(existing) = self
             .repos
             .iter()
@@ -105,17 +126,32 @@ impl Git {
         }
 
         let options = self.inspect_options();
-        let inspection = match backend::open_at(path) {
-            Ok(repo) => {
-                if !self.config.recurse_submodules && backend::is_submodule(&repo) {
-                    return None;
-                }
-                backend::inspect(&repo, &options)
-            }
-            Err(reason) => backend::inspection_error(path, reason),
+        let inspection = match self.config.backend {
+            Backend::Gix => match backend::open_at(path) {
+                Ok(repo) => backend::inspect(&repo, &options),
+                Err(reason) => model::inspection_error(path, reason),
+            },
+            Backend::Exec => exec::inspect(path, &options, host, self.exec_timeout()),
         };
+        if !self.config.recurse_submodules && inspection.kind == RepoKind::Submodule {
+            return None;
+        }
         self.repos.push(inspection.clone());
         Some(inspection)
+    }
+
+    /// Discovers the repository enclosing `path` (used for the ambient claim on
+    /// the crawl root).
+    fn discover_ancestor(&self, path: &Path, host: &mut dyn Host) -> Option<RepoInspection> {
+        let options = self.inspect_options();
+        match self.config.backend {
+            Backend::Gix => backend::discover_ancestor(path)
+                .ok()
+                .map(|repo| backend::inspect(&repo, &options)),
+            Backend::Exec => exec::discover_ancestor(path, host)
+                .ok()
+                .map(|root| exec::inspect(&root, &options, host, self.exec_timeout())),
+        }
     }
 
     /// Turns an inspection into a directory claim. Bare repositories always
@@ -134,9 +170,12 @@ impl Detector for Git {
     fn init(&mut self, info: &ScanInfo, host: &mut dyn Host) -> Result<(), DetectorError> {
         self.config = GitConfig::from_config(&info.config)?;
         if self.config.backend == Backend::Exec {
-            return Err(DetectorError::new(
-                "git backend \"exec\" is not implemented yet (M1.9); use backend = \"gix\"",
-            ));
+            // The exec fallback is disabled when the `git` program is missing
+            // (§7.1): probe once so the scan reports the plugin as disabled
+            // instead of turning every repository into `unknown`.
+            exec::probe(host).map_err(|reason| {
+                DetectorError::new(format!("git backend \"exec\" is unavailable: {reason}"))
+            })?;
         }
         self.root = info.root.clone();
         self.repos.clear();
@@ -145,8 +184,11 @@ impl Detector for Git {
         host.log(
             LogLevel::Debug,
             &format!(
-                "git: backend=gix report-ignored={} ignored-mode={:?} ancestor-repos={}",
-                self.config.report_ignored, self.config.ignored_mode, self.config.ancestor_repos
+                "git: backend={} report-ignored={} ignored-mode={:?} ancestor-repos={}",
+                self.config.backend.as_str(),
+                self.config.report_ignored,
+                self.config.ignored_mode,
+                self.config.ancestor_repos
             ),
         );
         Ok(())
@@ -155,7 +197,7 @@ impl Detector for Git {
     fn check_dir(
         &mut self,
         path: &Path,
-        _host: &mut dyn Host,
+        host: &mut dyn Host,
     ) -> Result<Option<Claim>, DetectorError> {
         // Git metadata directory: only reached when a repository claim did not
         // prune (report-ignored); it is the mechanism's own data, not user data.
@@ -164,7 +206,7 @@ impl Detector for Git {
         }
 
         if is_repo_root(path) {
-            let Some(inspection) = self.inspect_at(path) else {
+            let Some(inspection) = self.inspect_at(path, host) else {
                 return Ok(None);
             };
             return Ok(Some(
@@ -178,9 +220,8 @@ impl Detector for Git {
         if self.config.ancestor_repos && path == self.root {
             if !self.ancestor_checked {
                 self.ancestor_checked = true;
-                self.ancestor = backend::discover_ancestor(path)
-                    .ok()
-                    .map(|repo| backend::inspect(&repo, &self.inspect_options()));
+                let discovered = self.discover_ancestor(path, host);
+                self.ancestor = discovered;
             }
             if let Some(ancestor) = &self.ancestor
                 && ancestor.workdir.as_deref() != Some(path)
@@ -196,7 +237,7 @@ impl Detector for Git {
             let options = self.inspect_options();
             if let Some(repo) = self.repo_for(path)
                 && let Some(workdir) = repo.workdir.clone()
-                && let Some(relative) = backend::relative_path(&workdir, path)
+                && let Some(relative) = model::relative_path(&workdir, path)
                 && options.is_ignored(&repo.ignored, relative.as_ref())
             {
                 return Ok(Some(Claim::ignored().prune()));
@@ -218,7 +259,7 @@ impl Detector for Git {
         let Some(workdir) = repo.workdir.clone() else {
             return Ok(None);
         };
-        let Some(relative) = backend::relative_path(&workdir, path) else {
+        let Some(relative) = model::relative_path(&workdir, path) else {
             return Ok(None);
         };
 
@@ -256,7 +297,7 @@ fn is_repo_root(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use backupcrawl_plugin_sdk::{Attr, Config, MockHost, Status};
+    use backupcrawl_plugin_sdk::{Attr, Config, ExecResult, MockHost, Status};
     use std::path::PathBuf;
 
     fn scan_info(attrs: &[(&str, &str)]) -> ScanInfo {
@@ -270,6 +311,15 @@ mod tests {
                     .map(|(key, value)| Attr::new(*key, *value))
                     .collect(),
             ),
+        }
+    }
+
+    fn git_version() -> ExecResult {
+        ExecResult {
+            code: 0,
+            stdout: b"git version 2.56.0\n".to_vec(),
+            stderr: Vec::new(),
+            timed_out: false,
         }
     }
 
@@ -292,16 +342,32 @@ mod tests {
     }
 
     #[test]
-    fn init_rejects_exec_backend_with_a_clear_error() {
+    fn init_exec_probes_the_git_program() {
         let mut detector = Git::default();
-        let mut host = MockHost::new();
+        let mut host = MockHost::new().with_exec_result(git_version());
+
+        detector
+            .init(&scan_info(&[("backend", "exec")]), &mut host)
+            .unwrap();
+
+        assert_eq!(detector.config.backend, Backend::Exec);
+        let requests = host.exec_requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].program, "git");
+        assert_eq!(requests[0].args, ["--version"]);
+    }
+
+    #[test]
+    fn init_exec_without_git_disables_the_plugin() {
+        let mut detector = Git::default();
+        let mut host = MockHost::new().with_exec_error("exec: cannot find program `git`");
 
         let err = detector
             .init(&scan_info(&[("backend", "exec")]), &mut host)
             .unwrap_err();
 
         assert!(err.message().contains("exec"), "got: {err}");
-        assert!(err.message().contains("not implemented"), "got: {err}");
+        assert!(err.message().contains("git"), "got: {err}");
     }
 
     #[test]

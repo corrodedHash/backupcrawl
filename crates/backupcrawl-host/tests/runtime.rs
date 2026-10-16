@@ -22,10 +22,23 @@ fn fixture_bytes() -> Vec<u8> {
     .expect("checked-in fixture component")
 }
 
-/// A runtime with an isolated cache directory (tempdir kept alive by the caller).
+/// The shared wasmtime component cache, matching the one the CLI tests and the
+/// git-plugin tests use, so the fixture component is compiled once for the whole
+/// workspace instead of once per test.
+fn shared_component_cache() -> PathBuf {
+    std::env::temp_dir()
+        .join("backupcrawl-test-cache")
+        .join("backupcrawl")
+        .join("plugins")
+        .join("_components")
+}
+
+/// A runtime with an isolated per-plugin cache directory (tempdir kept alive by
+/// the caller) but the shared component cache.
 fn runtime(limits: Limits) -> (Runtime, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let runtime = Runtime::with_cache_root(limits, dir.path()).expect("runtime");
+    let runtime =
+        Runtime::with_cache_dirs(limits, dir.path(), shared_component_cache()).expect("runtime");
     (runtime, dir)
 }
 
