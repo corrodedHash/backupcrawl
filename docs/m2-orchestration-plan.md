@@ -28,8 +28,8 @@ Integration branch: `feat/rust-rewrite` in `/var/lib/opencode-agent/coding/backu
 | M2.0 contract hardening | `feat/m2.0-contract-hardening` | done, merged as `fbc5dd2` |
 | M2 pacman + symlinks | `feat/m2-pacman-symlinks` | done, merged as `72d8f3c` |
 | M4a parallel + progress | `feat/m4a-parallel-progress` | done, merged as `fb9e06e` |
-| M3.1 chezmoi | `feat/m3.1-chezmoi` | not started |
-| M3.2 syncthing | `feat/m3.2-syncthing` | not started |
+| M3.1 chezmoi | `feat/m3.1-chezmoi` | done, merged as `b0b7556` |
+| M3.2 syncthing | `feat/m3.2-syncthing` | done, merged as `f5bf631` |
 
 ## Frozen decisions for this sequence
 
@@ -154,6 +154,25 @@ Integration branch: `feat/rust-rewrite` in `/var/lib/opencode-agent/coding/backu
   committed `git`/`pacman`/`test-detector`/`dotbak` components were rebuilt from it. A cross-
   `CARGO_HOME` rebuild of the test fixture is byte-identical, and no machine paths remain in the
   artifacts. Baseline refreshed after the rebuild.
+- 2026-10-17: **Shared target dir + lighter dev profile** (`2e4b77e`). The machine-level cargo
+  config points every worktree at `/var/lib/opencode-agent/targets/shared`, and the wasm build
+  scripts and `scripts/test-stats.py` now resolve the effective `target-dir` through `cargo
+  metadata` instead of assuming `target/`. `.cargo/config.toml` sets `[profile.dev] debug = 1`.
+  This removes the duplicate ~10–30 GiB dependency trees per task (the shared dir was 11.5 GiB
+  after all four plugins) and avoids two concurrent full builds competing for RAM. Use **one**
+  cargo process at a time; `CARGO_BUILD_JOBS=4` and `--test-threads=2` keep a single run bounded.
+- 2026-10-17: **M3.1 chezmoi merged** (`b0b7556`) and **M3.2 syncthing merged** (`f5bf631`).
+  chezmoi runs `managed`/`status` once in `init`, caches the snapshot by source/dest mtimes and
+  maps destination changes to `dirty`, source-only changes to `ahead`, status failures to
+  `unknown`; managed symlinks are claimed. syncthing parses `config.xml`, claims folder roots
+  with `prune = true`, queries `/rest/db/status` once per folder, maps idle/syncing/error/
+  receive-only states and never claims a silent clean when the daemon is down. The host now
+  passes only `HOME`, `STCONFDIR` and `XDG_*` path variables into the guest environment (exec
+  children remain empty unless the request sets variables). Acceptance on the merged tree:
+  fmt, clippy `-D warnings`, `scripts/test-stats.py --check` green — **370 tests**, ~5.9 s warm
+  wall, ~20.6 s CPU, 184 MiB peak RSS; cold JIT per plugin: git 8.8 s, pacman 1.8 s, chezmoi
+  1.4 s, syncthing 0.8 s; shared target 11.5 GiB. All four plugin artifacts rebuild
+  byte-identically with the shared target dir.
 - 2026-10-17: **Build cache consolidated.** Every worktree previously built its own
   `CARGO_TARGET_DIR=/var/lib/opencode-agent/targets/<task>`, recompiling the wasmtime/cranelift/gix
   graph (~8 GB) per task; leftover dirs reached ~49 GB. Now a machine-level
