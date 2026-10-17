@@ -120,11 +120,12 @@ Key decisions:
 - **Alternative considered: native trait objects / dylib plugins.** Fastest, but ABI-fragile,
   unsafe boundary, no sandbox, and every new detector means a rebuild and trust decision in the
   core. Rejected.
-- **Filesystem access (v1): read-only `/` for every plugin.** The planned detectors need ancestor
-  repositories (7.1) and config-dependent paths (chezmoi source dir, syncthing `STCONFDIR`),
-  which per-plugin grants only cover with fragile glob specs; v1 grants a blanket read-only
-  preopen instead, `fs-read` stays documented intent, and scoping becomes the pre-third-party
-  hardening step (M5). Writes remain impossible; `exec`/`http` stay allowlisted (Appendix A).
+- **Filesystem access (M2.0): read-only preopens for the crawl root plus `fs-read`.** The host
+  resolves each manifest `fs-read` spec (plain paths, `~`, shell-style globs) and maps every
+  existing directory read-only at its absolute guest path; the crawl root is always granted.
+  System-wide detectors say so explicitly (`git` and `pacman` declare `fs-read = ["/"]`), while
+  third-party plugins get the scope they asked for. Writes remain impossible; `exec`/`http` stay
+  allowlisted (Appendix A).
 - **Transport is swappable.** Core code talks to a `Detector` trait, not to wasmtime:
 
   ```rust
@@ -235,23 +236,24 @@ interface host {
 }
 ```
 
-> File **content** is read through standard WASI filesystem access: in v1 the host instantiates
-> each plugin with a read-only preopen of `/` (cheap and sufficient for every planned detector;
-> capability scoping is revisited before third-party plugins ship). The custom `stat` import above
-> only fills the metadata gap WASI 0.2 leaves (mode/uid/gid/nlink). `exec`, `cache`, `http` and
-> `log` are custom imports; WASI has no process spawning, and we want allowlists for the rest.
+> File **content** is read through standard WASI filesystem access. Since M2.0 the host grants
+> read-only preopens for the crawl root plus every resolved `fs-read` spec, each mapped at its
+> own absolute guest path; a plugin that needs system-wide access must say so (the git and
+> pacman detectors declare `fs-read = ["/"]`). The custom `stat` import above only fills the
+> metadata gap WASI 0.2 leaves (mode/uid/gid/nlink). `exec`, `cache`, `http` and `log` are
+> custom imports; WASI has no process spawning, and we want allowlists for the rest.
 > Full reasoning: Appendix A.
 
 Design notes:
 
-- **Filesystem model (decided; Appendix A).** *Content:* a read-only WASI preopen of `/` for
-  every plugin in v1, so `std::fs` and crates such as `gix` work and wasmtime/`cap-std`
-  guarantees nothing can be written. Fine-grained, manifest-scoped preopens are a later
-  pre-third-party hardening step. *Metadata:* the custom `stat` import exposes mode/uid/gid/nlink,
-  which WASI 0.2 omits. No custom file-content reads exist.
-- **Grants are visible.** The manifest's `fs-read` specs and `exec`/`http` lists are printed by
-  `plugins info` and the trust prompt, together with the manifest hash. In v1 `fs-read` is
-  informational (the preopen is `/`); once scoping lands, it becomes the actual contract.
+- **Filesystem model (decided; Appendix A).** *Content:* standard WASI filesystem access through
+  read-only preopens of the crawl root plus the manifest's resolved `fs-read` roots (M2.0), each
+  at its absolute guest path, so `std::fs` and crates such as `gix` work while undeclared paths
+  stay invisible. *Metadata:* the custom `stat` import exposes mode/uid/gid/nlink, which WASI 0.2
+  omits; it is unconditional and metadata-only. No custom file-content reads exist.
+- **Grants are visible.** The manifest's resolved `fs-read` roots and `exec`/`http` lists are
+  printed by `plugins info` and the trust prompt, together with the manifest hash. Unresolved
+  specs are warnings; a plugin that declares `/` is shown as `read /`.
 - **State lives in the plugin instance** (one wasm instance = one mutable state); `init` builds
   caches, `finish` may flush to the host cache.
 - **Bulk calls are an optimization only.** `check-files` exists so the host can pass all files of
@@ -269,8 +271,8 @@ Design notes:
    error.
 3. **Trust** — a plugin whose manifest hash is not in the config trust list requires an explicit
    `--trust-plugin=NAME` or an interactive confirmation showing its capabilities (section 10).
-4. **Instantiate** — wasmtime component with a read-only `/` preopen (v1), per worker
-   (section 9), memory + fuel/epoch limits set.
+4. **Instantiate** — wasmtime component with read-only preopens for the crawl root and resolved
+   `fs-read` roots (M2.0), per worker (section 9), memory + fuel/epoch limits set.
 5. **`init(scan-info)`** — expensive global prep (pacman database read, chezmoi `managed`,
    syncthing config parse). Error → plugin disabled for this scan with a visible warning; the
    scan continues.
@@ -297,7 +299,7 @@ priority = 10           # lower = asked earlier; default 100
 
 [capabilities]
 exec = []                             # program allowlist; git reads repos via gix, no exec needed
-fs-read = ["~/.config/git"]            # documented intent; v1 preopens / read-only (Appendix A)
+fs-read = ["~/.config/git"]           # authoritative read roots (crawl root is always granted)
 http = []                             # e.g. ["http://127.0.0.1:8384"]
 cache = true                          # persistent per-plugin key/value cache
 
@@ -440,8 +442,8 @@ Edge cases: repository unreadable or unrecognized → `unknown` attr; repository
 filesystem → per-repo timeout → `unknown`; the exec fallback is additionally disabled when the
 `git` binary is missing.
 
-Capabilities: gix backend: `stat` only (`fs-read = []` documented; v1 preopens `/`); the exec
-fallback adds `exec = ["git"]`.
+Capabilities: gix backend: `stat` plus `fs-read = ["/"]` (the plugin may need repository data
+above the crawl root for ancestor discovery); the exec fallback adds `exec = ["git"]`.
 
 Config: `backend = "gix" | "exec"` (default `gix`), `no-upstream`, `report-ignored`,
 `ignored-mode = "matching" | "all"`, `ancestor-repos`, `recurse-submodules`, `timeout-ms`.
@@ -543,8 +545,8 @@ Edge cases: database unreadable → plugin disabled with warning; db lock presen
 invalidates the cache naturally; foreign/AUR packages are in the db like any other; directories
 and symlinks are owned too (claim symlinks as well, see 7.5).
 
-Capabilities: native `fs-read = ["/var/lib/pacman"]` (documented; v1 preopens `/`) + `stat`;
-the exec fallback adds `exec = ["pacman"]`.
+Capabilities: `fs-read = ["/"]` (package files live system-wide; authoritative since M2.0) +
+`stat`; the exec fallback adds `exec = ["pacman"]`.
 
 Config: `db-path`, `check-level = "metadata" | "checksum"`, `backend = "native" | "pacman"`,
 `timeout-ms`.
@@ -593,8 +595,8 @@ Current + propagated detection (daemon API):
 Semantics: syncthing is replication, not archival backup — repeat that in output
 (`attr: "synced to cluster, not archived"`), so nobody mistakes a two-node mirror for a backup.
 
-Capabilities: `fs-read = ["~/.local/state/syncthing", "~/.config/syncthing"]` (documented; v1
-preopens `/`); `http = ["http://127.0.0.1:<port>"]` only.
+Capabilities: `fs-read = ["~/.local/state/syncthing", "~/.config/syncthing"]` (authoritative
+since M2.0; the crawl root is always granted); `http = ["http://127.0.0.1:<port>"]` only.
 
 Config: `address` (override), `api-key` (override; file otherwise), `require-daemon` (default
 true), `assume-marker-only`, `receive-only-changes`, `timeout-ms`.
@@ -647,8 +649,9 @@ to reimplement source-state filename encoding and template evaluation, while `ch
 and `chezmoi status` already answer the three questions. The grant is a single allowlisted program,
 shown in the trust prompt. A native source-tree parser stays the M5 stretch goal.
 
-Capabilities: `exec = ["chezmoi"]`,
-`fs-read = ["~/.local/share/chezmoi", "~/.config/chezmoi"]` (documented; v1 preopens `/`).
+Capabilities: `exec = ["chezmoi"]`, `fs-read = ["~"]` (authoritative since M2.0: chezmoi reads
+the destination tree under `$HOME`, and the crawl root is always granted; source-dir/dest-dir
+overrides outside `$HOME` need their own spec).
 
 Config: `source-dir`, `dest-dir`, `include-types`, `report-unmanaged-in-source`, `timeout-ms`.
 
@@ -749,9 +752,9 @@ third-party plugins exist. See open question 4.
 - Progress display: port `PathTracker` semantics to `indicatif` + `console` (open/close counters,
   stragglers).
 
-Rough sequence: single-threaded crawler with per-plugin instances first (M1–M3), parallelism once
-behavior is stable (M4). Parallel crawling changes result ordering and user-visible error
-interleaving; keep it behind `--jobs` with a fixed default of 1 until proven.
+Rough sequence: single-threaded crawler with per-plugin instances first (M1–M2), then
+parallelism (M4a) once the grant/permission model is settled and pacman gives a real workload;
+keep it behind `--jobs` with a fixed default of 1 until proven.
 
 ## 10. Security and trust model
 
@@ -759,14 +762,12 @@ Threat model: the user may install a third-party detector from the internet; a d
 buggy or malicious. The host protects the machine.
 
 - **No ambient authority.** Detectors get only what the host grants: read-only filesystem
-  visibility (v1: all of `/`), optionally `exec`/`http` on top; no writes, no sockets beyond the
-  `http` allowlist. Fine-grained fs grants replace the blanket preopen before third-party plugins
-  ship.
-- **Files are read-only** through a WASI preopen of `/` in v1, enforced by wasmtime/`cap-std`
-  (no writes; there is nothing to escape to). Manifest `fs-read` specs are printed in
-  `plugins info` and the trust prompt as documentation of intent, and become the real scope
-  when fine-grained grants land before third-party plugins. The metadata `stat` import is
-  likewise unrestricted in v1.
+  visibility scoped to the crawl root plus the manifest's resolved `fs-read` roots (M2.0),
+  optionally `exec`/`http` on top; no writes, no sockets beyond the `http` allowlist.
+- **Files are read-only** through WASI preopens enforced by wasmtime/`cap-std` (no writes; there
+  is nothing to escape to). The resolved `fs-read` roots are printed in `plugins info` and the
+  trust prompt, and they are the actual content scope; a plugin that declares `/` is shown as
+  `read /`. The metadata `stat` import remains unrestricted and metadata-only.
 - **exec is the escape hatch.** A spawned `chezmoi` (or any allowlisted program a third-party
   plugin declares) runs with the user's rights and is *not* sandboxed. This is why the bundled git
   and pacman detectors avoid exec and why the capability must be loud: `backupcrawl plugins info
@@ -836,17 +837,33 @@ trust prompt.
 ## 12. Milestones
 
 Phase overview; each phase gets a task list with acceptance criteria when work on it starts
-(M0 is implemented and M1 is broken down below). The Python implementation is already preserved
+(M0/M1 are implemented and broken down below). The Python implementation is already preserved
 by tag `v0.2.6` and was removed in M0.
+
+**Ordering decision (2026-10-17).** The original M2→M3→M4→M5 order was revised: the pieces of
+M5 that define the plugin contract are pulled forward before more detectors are written, while
+distribution work and evidence-driven hardening stay later. The active sequence is:
+
+1. **M2.0** — make `fs-read` authoritative and freeze the per-worker lifecycle/cache rules.
+2. **M2** — pacman plugin + core symlink handling, written under the final grant model.
+3. **M4a** — parallel crawl, per-worker instances, init single-flight, `--jobs` and `--progress`,
+   validated against pacman.
+4. **M3** — chezmoi + syncthing, written against the final concurrency and permission model.
+
+M4b (distribution, `plugin new`, third-party example) and M5 (signing, backend hardening,
+candidate plugins) are deliberately **deferred** until after this sequence; they are not
+prerequisites for more first-party detectors.
 
 | Phase | Theme | Deliverable |
 | --- | --- | --- |
 | M0 | Core without plugins | Rust workspace replaces the Python package; walker + result model + console/JSON printers; everything loose; CLI/config; fixture-based tests |
 | M1 | Host + git | wasmtime host MVP: manifest, discovery, read-only `/` preopen, trust prompt, `init/check-dir/check-file/finish`, host imports stat/exec/cache/http/log, limits; **gix feasibility spike**, then the **git plugin** on gix (exec fallback behind `backend`), fixing the upstream bug; `plugins list/info` |
-| M2 | pacman + symlinks | **pacman plugin** native (`files`/`desc`/`mtree` + `stat`, unknown-format handling); symlink basic handling (own panel/JSON, no following); golden-output tests |
-| M3 | Dotfiles + sync | **chezmoi plugin**; **syncthing plugin**; `unknown`/`ignored` statuses wired through printers; `--ignored`, `--stats` |
-| M4 | Parallel + polish | Parallel crawl + per-worker instances + single-flight cache; progress display (`indicatif` + `console`); trust/config polish; `plugin new` + SDK docs; first third-party plugin example |
-| M5 | Hardening | Fine-grained plugin grants (`fs-read` becomes authoritative); harden native backends (gix edge cases, checksum level, drop the exec fallback if unused); optional native chezmoi source-tree parser; candidate plugins (Steam/recoverable status, restic/borg, cloud markers); plugin signing |
+| M2.0 | Contract hardening | `fs-read` becomes authoritative (resolved read-only preopens; crawl root always granted); per-worker lifecycle and cache rules frozen and documented; `plugins info`/trust prompt show the real scope |
+| M2 | pacman + symlinks | **pacman plugin** native (`files`/`desc`/`mtree` + `stat`, unknown-format handling); symlink basic handling (own panel/JSON, no following, target-in-managed-tree rule); golden-output tests |
+| M4a | Parallel crawl + progress | Parallel crawl with per-worker detector instances and deterministic merges; serialized `init` as the single-flight cache guard; `--jobs N` (default 1) and `--progress`; validated against pacman |
+| M3 | Dotfiles + sync | **chezmoi plugin**; **syncthing plugin**; `unknown`/`ignored` statuses wired through printers; `--ignored` |
+| M4b | Distribution + SDK (deferred) | Trust/config polish; `plugins install`; `plugin new` + SDK docs; first third-party plugin example |
+| M5 | Hardening (deferred) | Plugin signing; harden native backends (gix edge cases, checksum level, drop the exec fallback if unused); optional native chezmoi source-tree parser; candidate plugins (Steam/recoverable status, restic/borg, cloud markers); `--stats` |
 
 ### M0 task breakdown
 
@@ -1076,6 +1093,120 @@ ships on gix by default in this milestone or only behind `backend = "exec"`.
   home directory renders the `git` panel (2 `unknown`, 2 `dirty`, `plugins: git ok`), and
   `plugins list`/`plugins info git` show the bundled auto-trusted manifest.
 
+### M2.0 task breakdown (contract hardening)
+
+Acceptance for every task: `cargo fmt --check`,
+`cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` green.
+
+- **M2.0.1 Fine-grained filesystem grants.** `[capabilities].fs-read` stops being informational.
+  At instantiation the host grants read-only WASI preopens for (a) the crawl root and (b) every
+  resolved `fs-read` spec. Specs support `~` expansion and shell-style globs; a spec resolves to
+  existing directories, and an unresolved spec is a warning (the plugin still loads). Nested
+  roots are deduplicated to the broadest one, and each root is mapped at its own absolute guest
+  path so `std::fs`/`gix` absolute paths keep working. `stat` remains unconditional (metadata
+  only); content outside the granted roots is inaccessible. `plugins info` and the trust prompt
+  print the resolved roots (or `read /` when a plugin declares `/`), not "documented intent".
+  Bundled plugins may request broad roots honestly: git declares `fs-read = ["/"]` to keep
+  ancestor-repository discovery working across the crawl-root boundary. *Done when:* tests prove
+  a guest can read inside a granted root and cannot read outside it; `fs-read` resolution covers
+  plain paths, `~` and globs; the CLI golden output shows the real scope; the git and CLI
+  fixture detectors still pass their suites. **Deferred:** per-path read auditing and making
+  `stat` path-scoped.
+- **M2.0.2 Per-worker lifecycle and cache rules.** Document (and where cheap, test) the
+  concurrency contract M4a will implement: one detector instance per worker, `init`/`finish`
+  bracket that instance's lifetime, no shared mutable state between instances, shared
+  preparation only through the host cache, benign cache-write races, no cross-worker ordering
+  guarantees, and first-claim-wins still evaluated per path. Update
+  `docs/plugin-authoring.md`, the core `Detector` docs and the SDK docs so plugin authors do not
+  build single-instance assumptions. *Done when:* the contract is written down in the three
+  places and a compile-time/unit test pins `Detector: Send` and the documented cache behavior.
+
+### M2 task breakdown
+
+- **M2.1 pacman plugin (`plugins/pacman`).** Native database parsing, no `pacman` process:
+  `local/<pkg>/files` (verbatim paths, directories end in `/`, spaces preserved), `desc`
+  (`%NAME%`, `%VERSION%`, `%BACKUP%`) and gzipped BSD `mtree` entries. `init` builds one
+  path → package/mtree index, cached through the host cache keyed by the local db mtime, and
+  disables the plugin with a visible note when the db is missing/unreadable. `check_dir`,
+  `check_file` and `check_symlink` claim owned paths: matching metadata/symlink target → `clean`,
+  any mismatch → `dirty` with pacman-style reasons (`Size mismatch`, `Modification time
+  mismatch`, `UID/GID/Permissions mismatch`, `Symlink path mismatch`, `File type mismatch`, ...)
+  and `package`/`version` attrs; unparseable mtree data → `unknown` with a diagnostic, never a
+  wrong `clean`. `check-level = "metadata" | "checksum"` (checksum verifies md5/sha256, opt-in);
+  config `db-path`, `backend = "native"` (the `pacman -Qkk` fallback stays deferred with a clear
+  error), `timeout-ms`. Manifest: `fs-read = ["/"]` (package files live system-wide), `cache =
+  true`, hooks dir/file/symlink, priority 20. Build with `scripts/build-pacman-plugin.sh` into
+  `plugins/pacman/dist/{pacman.wasm,plugin.toml}`, embed in `bundled::REGISTRY`, and have CI fail
+  on a stale artifact. *Done when:* native unit tests cover the parsers and comparison logic;
+  host golden tests drive the built component against a fixture pacman db (clean, modified,
+  deleted, type change, symlink, backup file, space in path, unknown format); the bundled plugin
+  appears in `plugins list/info`; artifact rebuild is byte-identical.
+- **M2.2 Core symlink handling.** The walker stops skipping symlinks. Each link becomes
+  `LinkInfo { path, target, dangling }` (no traversal) and is offered to `check_symlink`; a claim
+  is recorded like any other (pacman and later chezmoi claim owned links). Unclaimed links are
+  collected into `CrawlResult.symlinks` and always reported: a dedicated console panel and a
+  `symlinks` JSON array with `path`, `target`, `dangling` and `status`. Apply the
+  target-in-managed-tree rule after the scan: if the resolved target is inside a subtree claimed
+  `clean` (or is itself a claimed-clean file), report the link `clean` with `via = <target>`;
+  otherwise it stays loose/unmanaged. `--follow-symlinks` remains deferred. *Done when:* core
+  tests cover a claimed link, an unclaimed loose link, a dangling link, the via-target rule and
+  JSON/console golden output; git repositories with `prune = true` do not regress; the plugin
+  authoring guide documents `check_symlink`.
+
+### M4a task breakdown
+
+- **M4a.1 Parallel walker with per-worker instances.** Rework `walker::scan` around a worker
+  pool sized by `--jobs N` (default 1, `0` = available parallelism). Each worker builds its own
+  detector instances from a factory, calls `init` once (serialized across workers so the first
+  init warms the host cache and the rest hit it) and `finish` when its queue drains. Workers
+  process directories from a shared queue (pruned directories are never enqueued), and each
+  path is still handled by exactly one worker, so first-claim-wins is unchanged. Collect
+  per-directory results and perform bottom-up loose-path collapsing and claim aggregation after
+  the traversal, so output is byte-identical across `--jobs 1` and `--jobs 8`. Merge per-worker
+  reports (errors summed, notes unioned in stable order, a disabled instance disables that
+  plugin). *Done when:* a determinism test runs the same fixture tree at several `--jobs`
+  values and compares console/JSON output; tests cover prune, denied paths, loose collapsing and
+  symlinks under parallelism; each worker's `init`/`finish` runs exactly once; the host cache
+  sees one preparation miss and N−1 hits for a fixture plugin.
+- **M4a.2 Progress display.** Add `--progress` using `indicatif` + `console` on **stderr**, with
+  open/closed directory counters, files seen, claims and denied paths, throttled and disabled
+  automatically when stderr is not a TTY. Progress must never interleave with console/JSON
+  output on stdout and must be off by default. *Done when:* a non-TTY (assert_cmd) run emits no
+  progress bytes on either stream, a forced/TTY-style render is unit-tested, and `--progress`
+  works with `--format json` without corrupting stdout.
+
+### M3 task breakdown
+
+- **M3.1 chezmoi plugin (`plugins/chezmoi`).** `exec = ["chezmoi"]` (the one bundled detector that
+  keeps exec). `init` runs `chezmoi managed --format json --path-style absolute` and
+  `chezmoi status --path-style absolute` once, resolves source/dest dirs from
+  `~/.config/chezmoi/chezmoi.toml` or config overrides, and caches the result. Claims: managed
+  and matching → `clean`; destination modified (` M`, `MM`, ...) → `dirty`; source modified but
+  not applied (`M `, ...) → `ahead`; template/exec failure → `unknown` with a reason. Managed
+  symlinks are claimed through `check_symlink`; `run_` scripts are ignored. Missing binary or
+  failed exec disables the plugin with a visible note. Manifest declares `fs-read = ["~"]`,
+  `exec = ["chezmoi"]`, `cache = true`; config `source-dir`, `dest-dir`, `include-types`,
+  `chezmoi-path` (test hook, default `chezmoi`), `timeout-ms`; priority 30. Build
+  `scripts/build-chezmoi-plugin.sh` into `plugins/chezmoi/dist/`, embed in the registry, CI
+  staleness check. *Done when:* native model tests cover the status mapping; host golden tests
+  use a fake `chezmoi` fixture binary (clean, dirty, ahead, unknown, symlink, missing binary);
+  the bundled plugin is listed/inspected; artifact rebuild is byte-identical.
+- **M3.2 syncthing plugin (`plugins/syncthing`).** Parse `config.xml` from `$STCONFDIR`,
+  `~/.local/state/syncthing` or `~/.config/syncthing` (folders, GUI address/API key), detect
+  `.stfolder` markers, and query `GET /rest/db/status?folder=<id>` once per folder per scan
+  through the host HTTP import (localhost, plain HTTP, size-capped). Map idle/no-need/no-errors
+  → `clean`; receive-only divergence → configurable `dirty`/`ahead`; `state = error`,
+  `pullErrors > 0` or a missing marker on a configured folder → `dirty`; daemon unreachable
+  without `assume-marker-only` → `unknown` with a reason (never a silent clean). Claims are made
+  at folder-root level with `prune = true` and an attr noting "synced to cluster, not archived".
+  Manifest: `fs-read = ["~/.local/state/syncthing", "~/.config/syncthing"]`, `http =
+  ["http://127.0.0.1:8384"]`, `cache = true`, priority 40; config `address`, `api-key`,
+  `require-daemon`, `assume-marker-only`, `receive-only-changes`, `timeout-ms`. Build
+  `scripts/build-syncthing-plugin.sh` into `plugins/syncthing/dist/`, embed in the registry, CI
+  staleness check. *Done when:* config parsing and status mapping have native tests; host golden
+  tests use a local fake HTTP server (clean, syncing, error, unreachable, marker missing); the
+  bundled plugin is listed/inspected; artifact rebuild is byte-identical.
+
 ## 13. Behavior inventory: carried over vs changed
 
 The Python tool has no users, so nothing here is a compatibility requirement; this is a checklist
@@ -1099,9 +1230,8 @@ instead of skipped; ignored files can be reported; pacman path-with-spaces parsi
    implementation is deleted from `main` and kept only in git history (tag `v0.2.6` already
    exists).
 2. **Filesystem access for plugins (resolved; see Appendix A):** standard WASI filesystem
-   access, read-only; v1 preopens `/` for every plugin and keeps manifest `fs-read` specs as
-   informational intent until fine-grained grants land (M5). Custom imports for `stat` (Unix
-   metadata), `exec`, `http`, `cache` and `log`.
+   access, read-only, scoped to the crawl root plus the resolved manifest `fs-read` roots
+   (M2.0). Custom imports for `stat` (Unix metadata), `exec`, `http`, `cache` and `log`.
 3. **JSON output (resolved):** free to design; no Python-compatible mode. Version the schema field.
 4. **Status extensions (resolved):** `unknown`/`ignored` are wired from the start; `recoverable`
    is deferred and added together with the first plugin that emits it (Steam, section 7.6).
@@ -1120,10 +1250,11 @@ instead of skipped; ignored files can be reported; pacman path-with-spaces parsi
 
 ## Appendix A. Filesystem access for plugins: WASI preopens vs custom host imports
 
-*Resolved 2026-10-11: standard WASI filesystem access, read-only; v1 grants a `/` preopen to every
-plugin and keeps manifest `fs-read` specs as informational intent (fine-grained scoping lands
-before third-party plugins). Custom `stat`/`exec`/`http`/`cache`/`log` imports. See A.6 for the
-decision and A.7 for the resulting model; the analysis below documents why.*
+*Resolved 2026-10-11: standard WASI filesystem access, read-only. **Revised 2026-10-17 (M2.0):**
+the preopen is scoped to the crawl root plus every resolved manifest `fs-read` root, each mapped
+at its absolute guest path; plugins that need system-wide access declare `/` explicitly. Custom
+`stat`/`exec`/`http`/`cache`/`log` imports. See A.6 for the decision and A.7 for the resulting
+model; the analysis below documents why.*
 
 ### A.1 The problem
 
@@ -1211,34 +1342,33 @@ covers the metadata WASI omits; and the bundled git and pacman detectors use nat
 implementations (gix, pacman database parsing) specifically to avoid `exec`, which remains a
 capability for chezmoi and third-party plugins.
 
-**Scope amendment (2026-10-11, first iteration):** the read-only preopen is `/` for every plugin
-rather than the crawl tree plus declared extras. The planned detectors need ancestor repositories
-(7.1) and config-dependent roots (chezmoi source dir, syncthing `STCONFDIR`), which path-scoped
-grants only cover with fragile glob specs; fine-grained preopens become a hardening step before
-third-party plugins ship (M5).
+**Scope amendment (2026-10-11, first iteration; superseded by M2.0):** the preopen was `/` for
+every plugin rather than the crawl tree plus declared extras. Since M2.0 the host grants the
+crawl root plus resolved `fs-read` roots; plugins with genuinely system-wide needs (git ancestor
+discovery, pacman package files) declare `/` in their manifest. See A.7.
 
 ### A.7 Chosen model in detail
 
-1. **Tier 1 — content (standard WASI).** At instantiation, the host builds a read-only preopen of
-   `/`. Plugins use `std::fs` normally or crates such as `gix`; `cap-std` rejects every write.
-   Fine-grained, manifest-resolved preopens (crawl root + declared extras) are the later hardening
-   step; the manifest field stays as documented intent until then.
+1. **Tier 1 — content (standard WASI).** At instantiation, the host builds a read-only preopen
+   for the crawl root plus every resolved `fs-read` root, mapped at its absolute guest path.
+   Plugins use `std::fs` normally or crates such as `gix`; `cap-std` rejects every write and
+   undeclared paths stay invisible. Nested roots are deduplicated to the broadest one.
 2. **Tier 2 — metadata (`stat` import).** Returns type/size/mtime/mode/uid/gid/nlink for any path.
    Content never flows through this import, so per-path checking carries little risk and does not
-   need preopen plumbing.
-3. **Path specs (`fs-read`) are informational in v1.** Entries are specs (`~` expansion, globs
-   such as `/var/lib/pacman` or `~/.local/state/syncthing*`) that document what the plugin
-   intends to read; they are printed by `plugins info` and the trust prompt. When fine-grained
-   preopens land, specs are resolved to existing directories at load time; unresolved specs are
-   warnings by default, errors if the plugin marks them required. Globs are preferred over regexes
-   for paths: the standard shell mental model, no regex escaping pitfalls (`/`, `.`, `+`). A regex
+   need preopen plumbing; it stays unconditional and metadata-only.
+3. **Path specs (`fs-read`) are authoritative (M2.0).** Entries are specs (`~` expansion, globs
+   such as `/var/lib/pacman` or `~/.local/state/syncthing*`) resolved to existing directories at
+   instantiation. Unresolved specs are warnings (the plugin still loads), nested roots are
+   deduplicated, and the crawl root is always granted. Globs are preferred over regexes for
+   paths: the standard shell mental model, no regex escaping pitfalls (`/`, `.`, `+`). A regex
    mode can be added later if a real need appears.
-4. **Published, not yet pinned.** `plugins info` and the trust prompt print the manifest, the
-   documented read roots, exec programs, HTTP origins and the manifest hash. In v1 the read scope
-   is always `/` regardless of what `fs-read` lists.
-5. **Consequences accepted (v1):**
-   - Every plugin can read every file readable by the user. The trust prompt says `fs: read /`
-     plainly; fine-grained grants that make `fs-read` meaningful are tracked for M5.
+4. **Published and pinned.** `plugins info` and the trust prompt print the manifest, the resolved
+   read roots, exec programs, HTTP origins and the manifest hash. A plugin that declares `/` is
+   shown as `fs: read /`; a scoped plugin shows each root.
+5. **Consequences:**
+   - A third-party plugin can read only the crawl root and the roots it declared. Bundled plugins
+     may declare broad roots (git and pacman use `/`) because they ship with the binary and are
+     auto-trusted; the scope is still visible.
    - No read auditing (preopen-level enforcement only). Revisit only if this becomes a hard
      requirement; switching a plugin's reads to custom imports would be a deliberate ABI change.
    - `exec` remains the strongest grant and is shown first; it is never implied by an fs grant.
