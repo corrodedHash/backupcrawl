@@ -371,7 +371,7 @@ def baseline_view(report: dict[str, Any]) -> dict[str, Any]:
         "schema": 1,
         "environment": {
             key: report["environment"][key]
-            for key in ("cpu", "logical_cpus", "mem_total_mib", "rustc")
+            for key in ("cpu", "logical_cpus", "mem_total_mib", "rustc", "target_dir")
         },
         "totals": report["totals"],
         "build": {
@@ -468,13 +468,17 @@ def compare(
                 f"cold JIT wall: {old_cold['wall_s']:.3f} -> "
                 f"{new_cold['wall_s']:.3f}"
             )
-    old_artifacts = baseline.get("artifacts", {}).get("target_bytes")
-    new_artifacts = report["artifacts"].get("target_bytes")
-    if old_artifacts and new_artifacts and new_artifacts > old_artifacts * 1.25:
-        problems.append(
-            f"target dir: {old_artifacts / 1024**3:.2f} -> "
-            f"{new_artifacts / 1024**3:.2f} GiB (+25%)"
-        )
+    # The target size is only comparable when the run used the same target dir;
+    # worktrees and per-task target dirs legitimately differ.
+    old_target = baseline.get("environment", {}).get("target_dir")
+    if old_target == report["environment"].get("target_dir"):
+        old_artifacts = baseline.get("artifacts", {}).get("target_bytes")
+        new_artifacts = report["artifacts"].get("target_bytes")
+        if old_artifacts and new_artifacts and new_artifacts > old_artifacts * 1.25:
+            problems.append(
+                f"target dir: {old_artifacts / 1024**3:.2f} -> "
+                f"{new_artifacts / 1024**3:.2f} GiB (+25%)"
+            )
     return problems
 
 
