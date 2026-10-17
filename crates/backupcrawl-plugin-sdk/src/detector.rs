@@ -18,12 +18,26 @@ use crate::types::{Claim, LinkInfo, ScanInfo};
 /// it needs. A return value of `Ok(None)` means "not managed by me"; the first
 /// detector returning `Some(claim)` wins (section 5.4).
 ///
+/// # One instance per worker
+///
+/// Parallel crawling (M4a) builds **one instance per worker** and calls
+/// `init`/`finish` around that instance's lifetime, so a scan with N workers
+/// calls both N times. Do not assume a single instance per process or any
+/// process-global mutable state: keep global preparation in the host cache via
+/// [`Host::cache_get`](crate::Host::cache_get)/[`cache_set`](crate::Host::cache_set),
+/// whose concurrent writers are expected to be benign (last write wins). There
+/// are no cross-worker ordering guarantees; each instance is independent and
+/// the host merges results deterministically.
+///
 /// Authors call [`bind_detector!`](crate::bind_detector) to emit the wasm
 /// component export glue for a type implementing this trait.
 pub trait Detector: Sized + 'static {
-    /// Called once before the scan. Expensive preparation (global listings,
-    /// cached state) belongs here. Returning `Err` disables the plugin for the
-    /// scan with a visible warning; the scan continues.
+    /// Called once before **this instance's** scan. Expensive preparation
+    /// (global listings, cached state) belongs here. Returning `Err` disables
+    /// the plugin for the scan with a visible warning; the scan continues.
+    ///
+    /// In a parallel scan (M4a) each worker's instance gets its own `init`; the
+    /// first one warms the host cache and the rest read it.
     fn init(&mut self, _info: &ScanInfo, _host: &mut dyn Host) -> Result<(), DetectorError> {
         Ok(())
     }

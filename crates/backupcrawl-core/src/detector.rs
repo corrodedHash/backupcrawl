@@ -235,6 +235,26 @@ impl Hooks {
 /// Implemented by the wasm host's `WasmDetector` and by the native
 /// `FixtureDetector` used in tests. `Send` because the walker may hand
 /// detectors to worker threads once parallel crawling lands (section 9).
+///
+/// # Per-worker lifecycle and cache rules (frozen, M2.0)
+///
+/// M4a runs one detector **instance per worker**, so a plugin must not assume a
+/// single instance per process. The contract, which holds for any `--jobs`
+/// value:
+///
+/// * `init`/`finish` bracket **that instance's** lifetime: a scan with N
+///   workers calls each plugin's `init` and `finish` N times.
+/// * Instances share no mutable state; the only shared channel is the host
+///   cache. Global preparation belongs there, and cache-write races between
+///   workers must be benign (last writer wins is acceptable). The first
+///   worker's `init` is serialized and warms the cache; the rest hit it.
+/// * There are no cross-worker ordering guarantees. First-claim-wins is still
+///   evaluated per path, and every path is handled by exactly one worker.
+/// * Output stays deterministic: per-worker claims are merged and sorted in the
+///   host after the walk, so `--jobs 1` and `--jobs N` produce identical output.
+///
+/// Plugins must not rely on process-global mutable state or on hook order
+/// across unrelated paths.
 pub trait Detector: Send {
     /// Called once per instance before the scan. Expensive preparation belongs
     /// here; an error disables the detector for this scan.
@@ -291,5 +311,19 @@ impl DetectorSlot {
             hooks,
             detector,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// M4a hands one detector slot to each worker, so the trait object must be
+    /// `Send`. This is a compile-time pin, not a behavioral test.
+    #[test]
+    fn detector_slots_are_send() {
+        fn assert_send<T: Send>() {}
+        assert_send::<Box<dyn Detector>>();
+        assert_send::<DetectorSlot>();
     }
 }

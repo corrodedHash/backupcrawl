@@ -139,13 +139,40 @@ through the `Host` trait, and the host grants only what the manifest declares:
 | `http(request)` | HTTP to an allowlisted origin (localhost-only by default) | `http = ["host"]` |
 | `log(level, message)` | Structured logging | always |
 
-File **content** is read through standard `std::fs` / WASI: in v1 the host
-instantiates every plugin with a read-only preopen of `/`, so `std::fs` and
-crates like `gix` work and wasmtime rejects every write. Manifest `fs-read`
-specs document intent but are not yet authoritative (Appendix A; the fine-grained
-scoping lands in M5). `exec` is the escape hatch — a spawned child runs with the
-user's rights and is *not* sandboxed, which is why `plugins info` and the trust
-prompt print it first.
+File **content** is read through standard `std::fs` / WASI. Since M2.0 the host
+grants read-only preopens for the **crawl root** plus every resolved
+`[capabilities].fs-read` root, each mounted at its own absolute path, so
+`std::fs` and crates like `gix` work while paths outside the grant stay
+invisible and wasmtime rejects every write. An `fs-read` spec may use a leading
+`~` and shell-style globs (`~/.local/state/syncthing*`) and must resolve to an
+existing directory; an unresolved spec is a warning, not a load error. A
+plugin with genuinely system-wide needs declares `/` and is shown as
+`fs: read /`. `exec` is the escape hatch — a spawned child runs with the user's
+rights and is *not* sandboxed, which is why `plugins info` and the trust prompt
+print it first.
+
+## Concurrency: one instance per worker
+
+Parallel crawling (M4a) runs **one detector instance per worker**, so a plugin
+must not assume it is the only instance in the process. The frozen contract:
+
+- `init`/`finish` bracket that instance's lifetime. A scan with N workers calls
+  your `init` and `finish` N times; keep both idempotent and side-effect-free
+  apart from the host cache.
+- Instances share no mutable state — no process-global caches, no static
+  `Mutex` state that assumes a single instance. Global preparation (for example
+  a package database listing) belongs in the host cache via
+  `cache_get`/`cache_set`, where concurrent writers must be benign (last write
+  wins is fine).
+- The first worker's `init` is serialized and warms the cache; the rest then hit
+  it. Do not rely on `init` running exactly once.
+- There are no cross-worker ordering guarantees. First-claim-wins is still
+  evaluated per path, and every path is handed to exactly one worker.
+- Output stays deterministic: the host merges and sorts per-worker claims, so
+  `--jobs 1` and `--jobs N` produce identical output.
+
+Treat each instance as independent: build all state in `init`, read shared
+inputs through the cache (or `std::fs`), and flush in `finish`.
 
 ## Testing natively (no wasm toolchain)
 
@@ -205,7 +232,7 @@ priority = 50                     # lower = asked earlier; default 100
 
 [capabilities]
 exec = []                         # program allowlist
-fs-read = ["~/.config/mine"]      # documented intent (v1 preopens /)
+fs-read = ["~/.config/mine"]      # read-only roots (crawl root always granted)
 http = []
 cache = false
 
@@ -269,10 +296,13 @@ $ backupcrawl plugins verify
 
 ## Current limitations (v1)
 
-- `fs-read` is documentation: the host preopens `/` read-only for every plugin.
-  Treat every file the user can read as readable.
+- `fs-read` is authoritative but coarse: the host enforces preopen-level access
+  only (no per-path read auditing), and `stat` is unconditional and
+  metadata-only. `exec` children are not sandboxed.
 - The walker does not call `check_symlink` yet (M2), and the host uses singular
   `check_file` calls rather than `check_files` (M4).
+- Parallel crawling is not enabled yet, but the per-worker contract above is
+  already the target: do not build single-instance assumptions.
 - `[config-schema]` is parsed but not enforced; validate your own config in
   `init` and return a `DetectorError` for bad values.
 - `exec` children are not sandboxed; keep the allowlist as small as possible.

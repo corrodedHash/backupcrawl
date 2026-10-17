@@ -250,6 +250,9 @@ macro_rules! bind_detector {
         /// The detector instance for this component. The WIT export functions
         /// are associated functions without `self`, so state lives here; wasm
         /// is single-threaded and host calls into one instance are serialized.
+        /// A parallel scan (M4a) builds one component instance per worker, each
+        /// with its own thread-local state; see [`Detector`] for the per-worker
+        /// contract.
         #[doc(hidden)]
         ::std::thread_local! {
             static __BACKUPCRAWL_DETECTOR: ::core::cell::RefCell<::core::option::Option<$detector>> =
