@@ -100,6 +100,10 @@ pub fn print_console(result: &CrawlResult, show_all: bool, run: &[PluginRunStatu
             &display_paths(&result.denied_paths),
         ));
     }
+    let symlinks = symlink_lines(result, show_all);
+    if !symlinks.is_empty() {
+        panels.push(render_panel("Symlinks", &symlinks));
+    }
     for report in &result.plugins {
         let lines = plugin_lines(report, show_all);
         if !lines.is_empty() {
@@ -116,6 +120,32 @@ pub fn print_console(result: &CrawlResult, show_all: bool, run: &[PluginRunStatu
     println!("{}", run_line(run));
 }
 
+/// Renders the symlink panel lines.
+///
+/// Unmanaged links are always shown (`[Unmanaged] path -> target`, with a
+/// `(dangling)` marker); links that are clean because their target lives in a
+/// clean-managed tree (`via`) appear only with `--all`.
+fn symlink_lines(result: &CrawlResult, show_all: bool) -> Vec<String> {
+    result
+        .symlinks
+        .iter()
+        .filter(|link| show_all || link.via.is_none())
+        .map(|link| {
+            let label = if link.via.is_some() {
+                "Clean"
+            } else {
+                "Unmanaged"
+            };
+            let dangling = if link.dangling { " (dangling)" } else { "" };
+            format!(
+                "[{label}] {} -> {}{dangling}",
+                link.path.display(),
+                link.target.display()
+            )
+        })
+        .collect()
+}
+
 /// Prints the crawl result as versioned JSON.
 pub fn print_json(result: &CrawlResult) -> Result<()> {
     let output = JsonOutput {
@@ -123,6 +153,16 @@ pub fn print_json(result: &CrawlResult) -> Result<()> {
         root: &result.root,
         not_backed_up: display_paths(&result.loose_paths),
         permission_denied: display_paths(&result.denied_paths),
+        symlinks: result
+            .symlinks
+            .iter()
+            .map(|link| JsonSymlink {
+                path: link.path.display().to_string(),
+                target: link.target.display().to_string(),
+                dangling: link.dangling,
+                via: link.via.as_ref().map(|via| via.display().to_string()),
+            })
+            .collect(),
         plugins: &result.plugins,
     };
     println!("{}", serde_json::to_string_pretty(&output)?);
@@ -370,7 +410,19 @@ struct JsonOutput<'a> {
     root: &'a PathBuf,
     not_backed_up: Vec<String>,
     permission_denied: Vec<String>,
+    /// Unmanaged symlinks, always present (empty when there are none).
+    symlinks: Vec<JsonSymlink>,
     plugins: &'a [PluginReport],
+}
+
+/// One entry of the JSON `symlinks` array.
+#[derive(Serialize)]
+struct JsonSymlink {
+    path: String,
+    target: String,
+    dangling: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    via: Option<String>,
 }
 
 fn plugin_lines(report: &PluginReport, show_all: bool) -> Vec<String> {

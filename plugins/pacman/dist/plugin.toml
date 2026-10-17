@@ -1,0 +1,25 @@
+[plugin]
+name = "pacman"
+version = "0.1.0"
+api = "1"
+description = "Arch Linux packages and their integrity state"
+license = "MIT"
+
+[hooks]
+# Directories, files and symlinks are all owned by packages.
+dir = true
+file = true
+symlink = true
+priority = 20
+
+[capabilities]
+# Detection is native (no `pacman` process); the deferred `backend = "pacman"`
+# fallback would need this allowlist.
+exec = []
+# Package-owned files live system-wide, so the database and every owned path
+# must be readable (authoritative read-only grant, M2.0).
+fs-read = ["/"]
+http = []
+# The parsed path -> package/mtree index is cached, keyed by the database path
+# and the `local/` mtime.
+cache = true

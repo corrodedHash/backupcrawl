@@ -13,4 +13,4 @@ pub mod walker;
 pub use detector::{
     Attr, Claim, Detector, DetectorError, DetectorReport, DetectorSlot, Hooks, LinkInfo, ScanInfo,
 };
-pub use model::{CrawlResult, Entry, PluginReport, Status};
+pub use model::{CrawlResult, Entry, PluginReport, Status, SymlinkEntry};

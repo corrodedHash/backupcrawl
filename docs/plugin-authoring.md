@@ -7,8 +7,9 @@ result. This document is the hands-on guide; the design rationale lives in
 [`rust-rewrite-plan.md`](rust-rewrite-plan.md) (§3–§5).
 
 The bundled [`plugins/git`](../plugins/git) detector is the reference
-implementation, and the SDK ships a complete worked example at
-`crates/backupcrawl-plugin-sdk/example-plugin`.
+implementation, and [`plugins/pacman`](../plugins/pacman) is the second bundled
+detector (native database parsing, no `exec`). The SDK ships a complete worked
+example at `crates/backupcrawl-plugin-sdk/example-plugin`.
 
 ## The model: three questions per path
 
@@ -119,9 +120,11 @@ Notes:
 - `check_files` has a default implementation that is exactly N `check_file`
   calls. **Do not change the observable behavior** if you override it for speed:
   the `@1` contract requires bulk and singular calls to agree.
-- `check_symlink` is part of the contract, but the v1 walker still skips
-  symlinks (§7.5; the reporting work lands in M2). Implement it now if the
-  semantics are clear; it will simply not be called yet.
+- `check_symlink` is called for every symlink the walker finds (M2). The link
+  is never followed; `LinkInfo.path` is the link itself and `LinkInfo.target` is
+  the target made absolute and lexically normalized, with `dangling` set when
+  the target does not exist. Unclaimed links become `SymlinkEntry` rows that the
+  host always reports.
 - `finish` runs once after the scan for diagnostics or flushing caches.
   Returning `Err` from `init` disables your plugin for the scan with a visible
   warning; errors from a check call count as "no claim".
@@ -265,6 +268,7 @@ scripts are the working reference:
 - `scripts/build-example-plugin.sh` — SDK example, default target.
 - `scripts/build-git-plugin.sh` — bundled git detector, `--target wasm32-wasip2`,
   reproducible with `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1`.
+- `scripts/build-pacman-plugin.sh` — bundled pacman detector, same pattern.
 
 > Reproducibility: the committed fixture artifacts are part of the repo and CI
 > fails if they are stale. Build the bundled detectors through their scripts so
@@ -299,8 +303,11 @@ $ backupcrawl plugins verify
 - `fs-read` is authoritative but coarse: the host enforces preopen-level access
   only (no per-path read auditing), and `stat` is unconditional and
   metadata-only. `exec` children are not sandboxed.
-- The walker does not call `check_symlink` yet (M2), and the host uses singular
-  `check_file` calls rather than `check_files` (M4).
+- Symlinks are reported, never followed: `--follow-symlinks` is deferred (M3+).
+  The WASI sandbox also refuses `std::fs::read_link` for a link whose *stored
+  target is absolute* (`EPERM`); use `LinkInfo.target` from `check_symlink` for
+  those, which the walker computed outside the sandbox.
+- The host uses singular `check_file` calls rather than `check_files` (M4).
 - Parallel crawling is not enabled yet, but the per-worker contract above is
   already the target: do not build single-instance assumptions.
 - `[config-schema]` is parsed but not enforced; validate your own config in

@@ -78,3 +78,8 @@ jobs:
         run: |
           scripts/build-git-plugin.sh
           git diff --exit-code -- plugins/git/dist/git.wasm
+      # Same for the bundled pacman plugin.
+      - name: Rebuild the bundled pacman plugin and fail on a stale artifact
+        run: |
+          scripts/build-pacman-plugin.sh
+          git diff --exit-code -- plugins/pacman/dist/pacman.wasm

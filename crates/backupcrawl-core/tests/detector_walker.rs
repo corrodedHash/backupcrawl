@@ -48,6 +48,7 @@ struct FixtureDetector {
     log: Log,
     dir_claims: BTreeMap<PathBuf, Claim>,
     file_claims: BTreeMap<PathBuf, Claim>,
+    symlink_claims: BTreeMap<PathBuf, Claim>,
     /// If set, `init` returns this error.
     init_error: Option<DetectorError>,
     /// If set, the matching check returns this error.
@@ -63,6 +64,7 @@ impl FixtureDetector {
             log: Log::default(),
             dir_claims: BTreeMap::new(),
             file_claims: BTreeMap::new(),
+            symlink_claims: BTreeMap::new(),
             init_error: None,
             check_error: None,
             file_error: None,
@@ -82,6 +84,12 @@ impl FixtureDetector {
     #[must_use]
     fn claim_file(mut self, path: impl Into<PathBuf>, claim: Claim) -> Self {
         self.file_claims.insert(path.into(), claim);
+        self
+    }
+
+    #[must_use]
+    fn claim_symlink(mut self, path: impl Into<PathBuf>, claim: Claim) -> Self {
+        self.symlink_claims.insert(path.into(), claim);
         self
     }
 
@@ -139,7 +147,16 @@ impl Detector for FixtureDetector {
     fn check_symlink(&mut self, link: &LinkInfo) -> Result<Option<Claim>, DetectorError> {
         self.log
             .push(format!("symlink:{}:{}", self.name, link.path.display()));
-        Ok(None)
+        if let Some(err) = self.check_error.as_ref() {
+            return Err(match err {
+                DetectorError::Disabled { name, reason } => DetectorError::Disabled {
+                    name: name.clone(),
+                    reason: reason.clone(),
+                },
+                DetectorError::Host(message) => DetectorError::Host(message.clone()),
+            });
+        }
+        Ok(self.symlink_claims.get(&link.path).cloned())
     }
 
     fn finish(&mut self) -> Result<(), DetectorError> {
@@ -404,4 +421,170 @@ fn an_init_failure_disables_the_detector_for_the_scan() {
     assert!(!log.entries().iter().any(|e| e.starts_with("file:")));
     assert!(!log.entries().iter().any(|e| e.starts_with("finish:")));
     assert_eq!(result.loose_paths, vec![root.join("a.txt")]);
+}
+
+// ---------------------------------------------------------------------------
+// Symlinks (M2.2, section 7.5)
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+fn symlink(target: &Path, link: &Path) {
+    std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
+#[test]
+fn unmanaged_symlinks_are_reported_never_dropped() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    touch(&root.join("real.txt"));
+    symlink(&root.join("real.txt"), &root.join("link.txt"));
+
+    let mut detectors = Vec::new();
+    let result = walker::scan(root, &matcher(&[]), &mut detectors);
+
+    assert_eq!(result.loose_paths, vec![root.join("real.txt")]);
+    assert_eq!(
+        result.symlinks,
+        vec![backupcrawl_core::SymlinkEntry {
+            path: root.join("link.txt"),
+            target: root.join("real.txt"),
+            dangling: false,
+            via: None,
+        }]
+    );
+}
+
+#[test]
+fn dangling_symlinks_are_marked() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    symlink(Path::new("missing.txt"), &root.join("broken.txt"));
+
+    let mut detectors = Vec::new();
+    let result = walker::scan(root, &matcher(&[]), &mut detectors);
+
+    assert_eq!(result.symlinks.len(), 1);
+    let link = &result.symlinks[0];
+    assert_eq!(link.target, root.join("missing.txt"));
+    assert!(link.dangling);
+    assert_eq!(link.via, None);
+    assert!(result.loose_paths.is_empty());
+}
+
+#[test]
+fn relative_targets_are_made_absolute_and_normalized() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    touch(&root.join("sub/real.txt"));
+    symlink(Path::new("sub/./real.txt"), &root.join("link.txt"));
+
+    let mut detectors = Vec::new();
+    let result = walker::scan(root, &matcher(&[]), &mut detectors);
+
+    assert_eq!(result.symlinks[0].target, root.join("sub/real.txt"));
+}
+
+#[test]
+fn a_claimed_symlink_stays_in_the_plugin_panel() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    touch(&root.join("real.txt"));
+    symlink(&root.join("real.txt"), &root.join("link.txt"));
+
+    let detector = FixtureDetector::new("pacman").claim_symlink(
+        root.join("link.txt"),
+        Claim::clean().attr("package", "demo"),
+    );
+    let (slot, log) = detector.slot();
+
+    let mut detectors = vec![slot];
+    let result = walker::scan(root, &matcher(&[]), &mut detectors);
+
+    assert!(result.symlinks.is_empty(), "claimed links are not loose");
+    assert_eq!(entries(&result, 0), vec![("link.txt".to_owned(), "clean")]);
+    assert_eq!(
+        result.plugins[0].entries[0]
+            .attrs
+            .get("package")
+            .map(String::as_str),
+        Some("demo")
+    );
+    // The detector was asked, with an absolute normalized target.
+    assert!(log.contains(&format!(
+        "symlink:pacman:{}",
+        root.join("link.txt").display()
+    )));
+}
+
+#[test]
+fn via_target_rule_uses_clean_pruning_directory_claims() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    touch(&root.join("tree/real.txt"));
+    symlink(&root.join("tree/real.txt"), &root.join("link.txt"));
+
+    let detector = FixtureDetector::new("vcs").claim_dir(root.join("tree"), Claim::clean().prune());
+    let (slot, _log) = detector.slot();
+
+    let mut detectors = vec![slot];
+    let result = walker::scan(root, &matcher(&[]), &mut detectors);
+
+    assert_eq!(result.symlinks.len(), 1);
+    assert_eq!(
+        result.symlinks[0].via,
+        Some(root.join("tree/real.txt")),
+        "a clean pruning claim covers its subtree"
+    );
+}
+
+#[test]
+fn via_target_rule_ignores_non_pruning_directory_claims() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    touch(&root.join("tree/real.txt"));
+    symlink(&root.join("tree/real.txt"), &root.join("link.txt"));
+
+    // The directory is claimed clean but does not prune, so the claim is not
+    // extended to the unclaimed `tree/real.txt` inside it.
+    let detector = FixtureDetector::new("vcs").claim_dir(root.join("tree"), Claim::clean());
+    let (slot, _log) = detector.slot();
+
+    let mut detectors = vec![slot];
+    let result = walker::scan(root, &matcher(&[]), &mut detectors);
+
+    assert_eq!(result.symlinks[0].via, None);
+    assert_eq!(result.loose_paths, vec![root.join("tree/real.txt")]);
+}
+
+#[test]
+fn via_target_rule_accepts_an_exactly_claimed_clean_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    touch(&root.join("real.txt"));
+    symlink(&root.join("real.txt"), &root.join("link.txt"));
+
+    let detector = FixtureDetector::new("vcs").claim_file(root.join("real.txt"), Claim::clean());
+    let (slot, _log) = detector.slot();
+
+    let mut detectors = vec![slot];
+    let result = walker::scan(root, &matcher(&[]), &mut detectors);
+
+    assert_eq!(result.symlinks[0].via, Some(root.join("real.txt")));
+}
+
+#[test]
+fn dirty_claims_do_not_make_a_target_managed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    touch(&root.join("tree/real.txt"));
+    symlink(&root.join("tree/real.txt"), &root.join("link.txt"));
+
+    let detector = FixtureDetector::new("vcs").claim_dir(root.join("tree"), Claim::dirty().prune());
+    let (slot, _log) = detector.slot();
+
+    let mut detectors = vec![slot];
+    let result = walker::scan(root, &matcher(&[]), &mut detectors);
+
+    assert_eq!(result.symlinks[0].via, None);
 }

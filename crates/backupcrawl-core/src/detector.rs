@@ -27,8 +27,9 @@
 //! [`Detector::report`] accessor exposes the host's lifecycle accounting
 //! (errors, notes, disable reason) so the walker can build a
 //! [`PluginReport`](crate::model::PluginReport) without duplicating the circuit
-//! breaker bookkeeping. The walker still carries `check_symlink` but keeps
-//! **skipping** symlinks until M2 (section 7.5 / M1.6).
+//! breaker bookkeeping. Since M2 the walker genuinely calls `check_symlink` for
+//! every symlink it finds (section 7.5); a detector only receives those calls
+//! when it declared the `symlink` hook.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -151,13 +152,15 @@ pub struct ScanInfo {
 
 /// A symlink seen by the walker, handed to [`Detector::check_symlink`].
 ///
-/// The walker does not call this yet (symlinks are skipped until M2), but the
-/// record is part of the frozen contract so plugins can implement the hook.
+/// The walker builds this for every symlink (never following it) and offers it
+/// to detectors that declared the `symlink` hook. `target` is absolute and
+/// lexically normalized so it compares against walker paths; `dangling` means
+/// the target does not exist (including broken chains).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkInfo {
     /// Path of the symlink itself.
     pub path: PathBuf,
-    /// Target the link points at (not necessarily resolved).
+    /// Absolute, lexically normalized target (not fully resolved).
     pub target: PathBuf,
     /// Whether the target does not exist.
     pub dangling: bool,
@@ -215,7 +218,7 @@ pub struct Hooks {
     pub dir: bool,
     /// Whether `check_file` should be called.
     pub file: bool,
-    /// Whether `check_symlink` should be called (unused until M2).
+    /// Whether `check_symlink` should be called.
     pub symlink: bool,
 }
 

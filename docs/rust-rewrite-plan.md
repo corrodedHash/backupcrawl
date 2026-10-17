@@ -676,14 +676,15 @@ Design:
   - pacman: package-owned symlinks appear in `-Ql`; claim them like files (clean/dirty by `-Qkk`).
   - chezmoi: `symlink_` source entries → managed; claim according to `chezmoi status`.
   - stow/dotbot/rcm-style farms: a future plugin or `--follow-symlinks`.
-- Unclaimed links become `SymlinkEntry` and are shown in their own console panel and JSON key
-  (`symlinks`), never dropped:
-  - attr `target`: resolved target path (absolute, normalized);
-  - `dangling = true` if the target does not exist;
-  - **target-in-managed-tree rule:** if the resolved target lies inside a subtree that was claimed
-    `clean` by a plugin (or is itself a claimed-clean file), the link is reported `clean` with
-    attr `via = <target>`. This is the common, correct case for dotfile setups where the real
-    files live in a synced/git-managed tree.
+- Unclaimed links become `SymlinkEntry` and are shown in their own console panel
+  ("Symlinks") and JSON key (`symlinks`), never dropped:
+  - field `target`: resolved target path (absolute, lexically normalized);
+  - field `dangling = true` if the target does not exist (including broken chains);
+  - field `via = Some(<target>)` when the **target-in-managed-tree rule** applies: if the resolved
+    target lies inside a subtree that was claimed `clean` by a plugin **with `prune = true`** (or is
+    itself a claimed-clean path), the link is reported clean via that target. This is the common,
+    correct case for dotfile setups where the real files live in a synced/git-managed tree. A
+    non-pruning directory claim is deliberately not extended to its subtree.
   - otherwise the link is loose/unmanaged (it is a pointer plus, potentially, unreferenced data
     elsewhere).
 - `--follow-symlinks` (off by default): follow non-dangling links during traversal with a visited
@@ -714,13 +715,16 @@ third-party plugins exist. See open question 4.
 - Statuses: `clean`, `dirty`, `ahead`, `unknown`, plus optional `ignored` (section 3;
   `recoverable` arrives with the first plugin that needs it). Console panels label `ahead` as
   "Unsynced".
-- Panels: per-plugin, split into Dirty / Unsynced / Unknown / Clean (`Clean` only with `--all`).
-  Loose / denied / symlink panels as today plus the new symlink panel.
+- Panels: per-plugin, split into Dirty / Unsynced / Unknown / Clean (`Clean` only with `--all`),
+  plus the "Not backed up" / "Permission denied" panels and the "Symlinks" panel. The symlink
+  panel always shows unmanaged links as `[Unmanaged] path -> target` (with a `(dangling)` marker)
+  and shows via-clean links as `[Clean]` only with `--all`.
 - Console rendering: the `console` crate for styling/TTY detection and `indicatif` for progress
   (same ecosystem, closest analog to rich); panels are hand-rolled box drawing. No TUI
   (`ratatui`) for now — it is the right tool only for an interactive result browser.
-- JSON: a versioned schema (`"schema": 1`), with per-plugin lowercase status keys and attrs. No
-  Python-compatibility mode (decision in section 14).
+- JSON: a versioned schema (`"schema": 1`), with per-plugin lowercase status keys and attrs. The
+  `symlinks` array carries `path`, `target`, `dangling` and `via` (omitted unless set), sorted by
+  path. No Python-compatibility mode (decision in section 14).
 - Exit codes: v1 stays conventional — `0` on success, `2` for usage/config errors; scan results
   (unbacked data, plugin warnings) do not change the exit status. A `--fail-on unbacked|error`
   mode is deliberately deferred until scripts need it: defining "unbacked" (loose/dirty/ahead vs
@@ -1156,13 +1160,13 @@ Acceptance for every task: `cargo fmt --check`,
   `LinkInfo { path, target, dangling }` (no traversal) and is offered to `check_symlink`; a claim
   is recorded like any other (pacman and later chezmoi claim owned links). Unclaimed links are
   collected into `CrawlResult.symlinks` and always reported: a dedicated console panel and a
-  `symlinks` JSON array with `path`, `target`, `dangling` and `status`. Apply the
+  `symlinks` JSON array with `path`, `target`, `dangling` and `via`. Apply the
   target-in-managed-tree rule after the scan: if the resolved target is inside a subtree claimed
-  `clean` (or is itself a claimed-clean file), report the link `clean` with `via = <target>`;
-  otherwise it stays loose/unmanaged. `--follow-symlinks` remains deferred. *Done when:* core
-  tests cover a claimed link, an unclaimed loose link, a dangling link, the via-target rule and
-  JSON/console golden output; git repositories with `prune = true` do not regress; the plugin
-  authoring guide documents `check_symlink`.
+  `clean` with `prune = true` (or is itself a claimed-clean path), report the link clean with
+  `via = <target>`; otherwise it stays loose/unmanaged. `--follow-symlinks` remains deferred. *Done
+  when:* core tests cover a claimed link, an unclaimed loose link, a dangling link, the via-target
+  rule and JSON/console golden output; git repositories with `prune = true` do not regress; the
+  plugin authoring guide documents `check_symlink`.
 
 ### M4a task breakdown
 

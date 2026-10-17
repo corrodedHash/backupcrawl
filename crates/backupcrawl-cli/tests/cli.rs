@@ -262,8 +262,10 @@ fn plugins_list_shows_sorted_table_and_load_errors() {
             vec!["NAME", "VERSION", "SOURCE", "API", "ENABLED", "TRUST"],
             vec!["alpha", "2.0.0", "explicit", "ok", "yes", "new"],
             vec!["demo", "0.1.0", "explicit", "ok", "yes", "new"],
-            // The bundled git detector is part of discovery from M1.8 on.
+            // The bundled git and pacman detectors are part of discovery from
+            // M1.8/M2.1 on.
             vec!["git", "0.1.0", "bundled", "ok", "yes", "bundled"],
+            vec!["pacman", "0.1.0", "bundled", "ok", "yes", "bundled"],
         ]
     );
 
@@ -301,8 +303,9 @@ fn plugins_list_reflects_enabled_and_trust_config() {
             vec!["NAME", "VERSION", "SOURCE", "API", "ENABLED", "TRUST"],
             vec!["alpha", "2.0.0", "explicit", "ok", "no", "new"],
             vec!["demo", "0.1.0", "explicit", "ok", "yes", "changed"],
-            // Only `demo` is enabled, so the bundled git detector is disabled.
+            // Only `demo` is enabled, so the bundled detectors are disabled.
             vec!["git", "0.1.0", "bundled", "ok", "no", "bundled"],
+            vec!["pacman", "0.1.0", "bundled", "ok", "no", "bundled"],
         ]
     );
 }
@@ -790,7 +793,9 @@ fn crawl_selects_and_orders_detectors() {
         "got:\n{stdout}"
     );
 
-    // `[plugins] order` pins alpha first, overriding priority.
+    // `[plugins] order` pins alpha first, overriding priority. `--plugins`
+    // keeps the bundled detectors out so the run line names exactly the
+    // fixtures under test.
     let config = tmp.path().join("config.toml");
     fs::write(&config, "[plugins]\norder = [\"alpha\"]\n").unwrap();
     let out = crawl_command(xdg.path())
@@ -799,12 +804,152 @@ fn crawl_selects_and_orders_detectors() {
         .arg(&config)
         .args(["--plugin-dir"])
         .arg(plugins_fixture_dir())
+        .args(["--plugins", "alpha,demo"])
         .output()
         .unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(
         stdout.contains("plugins: alpha disabled (untrusted), demo disabled (untrusted)"),
+        "got:\n{stdout}"
+    );
+}
+
+// --- symlinks --------------------------------------------------------------
+
+#[cfg(unix)]
+fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) {
+    let link = link.as_ref();
+    fs::create_dir_all(link.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn crawl_json_reports_unmanaged_symlinks() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("tree");
+    touch(&root.join("real.txt"));
+    symlink(root.join("real.txt"), root.join("link.txt"));
+    symlink("missing.txt", root.join("broken.txt"));
+
+    let json = run_json(&root, &[std::ffi::OsStr::new("--no-plugins")]);
+
+    let symlinks = json["symlinks"].as_array().unwrap();
+    assert_eq!(symlinks.len(), 2, "{json:#}");
+
+    let broken = &symlinks[0];
+    assert!(broken["path"].as_str().unwrap().ends_with("broken.txt"));
+    assert_eq!(
+        broken["target"].as_str().unwrap(),
+        root.join("missing.txt").display().to_string()
+    );
+    assert_eq!(broken["dangling"], true);
+    assert!(broken.get("via").is_none(), "via is omitted when unset");
+
+    let link = &symlinks[1];
+    assert!(link["path"].as_str().unwrap().ends_with("link.txt"));
+    assert_eq!(
+        link["target"].as_str().unwrap(),
+        root.join("real.txt").display().to_string()
+    );
+    assert_eq!(link["dangling"], false);
+}
+
+#[cfg(unix)]
+#[test]
+fn console_shows_the_symlink_panel_with_unmanaged_links() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("tree");
+    touch(&root.join("real.txt"));
+    symlink(root.join("real.txt"), root.join("link.txt"));
+    symlink("missing.txt", root.join("broken.txt"));
+    let xdg = tempfile::tempdir().unwrap();
+
+    let output = crawl_command(xdg.path())
+        .arg(&root)
+        .arg("--no-plugins")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    assert!(stdout.contains("╭─ Symlinks "), "got:\n{stdout}");
+    assert!(
+        stdout.contains(&format!(
+            "[Unmanaged] {} -> {}",
+            root.join("link.txt").display(),
+            root.join("real.txt").display()
+        )),
+        "got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!(
+            "[Unmanaged] {} -> {} (dangling)",
+            root.join("broken.txt").display(),
+            root.join("missing.txt").display()
+        )),
+        "got:\n{stdout}"
+    );
+    assert!(!stdout.contains('\u{1b}'), "unexpected ANSI escapes");
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinks_into_a_clean_pruning_claim_are_via_clean() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("tree");
+    touch(&root.join("farm/.dotbak"));
+    touch(&root.join("farm/real.txt"));
+    symlink(root.join("farm/real.txt"), root.join("link.txt"));
+    let xdg = tempfile::tempdir().unwrap();
+
+    let output = crawl_command(xdg.path())
+        .arg(&root)
+        .args(["--format", "json", "--plugin-dir"])
+        .arg(detectors_fixture_dir())
+        .args(["--plugins", "dotbak", "--trust-plugin", "dotbak"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    let symlinks = json["symlinks"].as_array().unwrap();
+    assert_eq!(symlinks.len(), 1, "{json:#}");
+    assert_eq!(
+        symlinks[0]["via"].as_str().unwrap(),
+        root.join("farm/real.txt").display().to_string()
+    );
+
+    // Without `--all` the via-clean link is hidden; with `--all` it shows.
+    let default = crawl_command(xdg.path())
+        .arg(&root)
+        .args(["--plugin-dir"])
+        .arg(detectors_fixture_dir())
+        .args(["--plugins", "dotbak", "--trust-plugin", "dotbak"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(default.stdout).unwrap();
+    assert!(!stdout.contains("Symlinks"), "got:\n{stdout}");
+
+    let all = crawl_command(xdg.path())
+        .arg(&root)
+        .args(["--all", "--plugin-dir"])
+        .arg(detectors_fixture_dir())
+        .args(["--plugins", "dotbak", "--trust-plugin", "dotbak"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(all.stdout).unwrap();
+    assert!(
+        stdout.contains(&format!(
+            "[Clean] {} -> {}",
+            root.join("link.txt").display(),
+            root.join("farm/real.txt").display()
+        )),
         "got:\n{stdout}"
     );
 }
