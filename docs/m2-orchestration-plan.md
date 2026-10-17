@@ -26,7 +26,7 @@ Integration branch: `feat/rust-rewrite` in `/var/lib/opencode-agent/coding/backu
 | Task | Branch | Status |
 | --- | --- | --- |
 | M2.0 contract hardening | `feat/m2.0-contract-hardening` | done, merged as `fbc5dd2` |
-| M2 pacman + symlinks | `feat/m2-pacman-symlinks` | not started |
+| M2 pacman + symlinks | `feat/m2-pacman-symlinks` | done, merged as `72d8f3c` |
 | M4a parallel + progress | `feat/m4a-parallel-progress` | not started |
 | M3.1 chezmoi | `feat/m3.1-chezmoi` | not started |
 | M3.2 syncthing | `feat/m3.2-syncthing` | not started |
@@ -95,6 +95,19 @@ Integration branch: `feat/rust-rewrite` in `/var/lib/opencode-agent/coding/backu
 
 - 2026-10-17: sequence recorded in `docs/rust-rewrite-plan.md` §12; M2.0/M2/M4a/M3 task
   breakdowns added; M4b and M5 marked deferred. Worktrees to be created per wave.
+- 2026-10-17: **M2 merged** (`72d8f3c`, branch `feat/m2-pacman-symlinks`: `6d4ee61`,
+  `364e6dc`, `ccde53d`). Core reports symlinks instead of dropping them
+  (`SymlinkEntry`/`CrawlResult.symlinks`, console panel, JSON array, the target-in-managed-tree
+  rule over clean pruning dir claims). New bundled pacman detector: native `files`/`desc`/gzipped
+  BSD `mtree` parsing with `/set` defaults and octal escapes, metadata + optional md5/sha256
+  verification, reasons in the `reason` attr, a cached index keyed by db path + `local/` mtime,
+  `fs-read = ["/"]`, `cache = true`, priority 20; `scripts/build-pacman-plugin.sh` and CI
+  reproduce `plugins/pacman/dist/pacman.wasm` byte-identically. Acceptance on the merged tree:
+  fmt, clippy `-D warnings`, `scripts/test-stats.py --check` green — **250 tests**, ~5.6 s warm
+  wall, ~20.6 s CPU, 178 MiB peak RSS; baseline refreshed. Deviations: absolute symlink targets
+  are read through the walker's `LinkInfo` because cap-std refuses `read_link` on them; deleted
+  package files are only observable when asked directly (the walker only asks about existing
+  paths) and remain a follow-up; `backend = "pacman"` is rejected as not implemented.
 - 2026-10-17: **M2.0 merged** (`fbc5dd2`, branch `feat/m2.0-contract-hardening`:
   `2ec51a6`, `1cabe1a`, `a614168`). New `backupcrawl-host::fs` resolves `fs-read` specs
   (`~` + shell globs), deduplicates nested roots to the broadest and preopens the crawl root plus
