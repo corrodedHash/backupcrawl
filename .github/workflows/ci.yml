@@ -83,3 +83,8 @@ jobs:
         run: |
           scripts/build-pacman-plugin.sh
           git diff --exit-code -- plugins/pacman/dist/pacman.wasm
+      # Same for the bundled chezmoi plugin.
+      - name: Rebuild the bundled chezmoi plugin and fail on a stale artifact
+        run: |
+          scripts/build-chezmoi-plugin.sh
+          git diff --exit-code -- plugins/chezmoi/dist/chezmoi.wasm
