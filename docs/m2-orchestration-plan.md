@@ -70,7 +70,10 @@ Integration branch: `feat/rust-rewrite` in `/var/lib/opencode-agent/coding/backu
 2. Run acceptance on the merged tree:
    `cargo fmt --check`,
    `cargo clippy --workspace --all-targets -- -D warnings`,
-   `cargo test --workspace`.
+   `scripts/test-stats.py --check` (runs the workspace tests and compares
+   wall/CPU/RSS/IO/cold-JIT against `docs/test-metrics/baseline.json`; see
+   `docs/test-metrics.md`). During task development, run only the touched
+   crate's tests; full stats are for merge review.
 3. Rebuild every changed plugin artifact and confirm byte-identical output:
    `scripts/build-git-plugin.sh`, `scripts/build-pacman-plugin.sh`,
    `scripts/build-chezmoi-plugin.sh`, `scripts/build-syncthing-plugin.sh` (as they land).

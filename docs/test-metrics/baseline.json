@@ -1,0 +1,264 @@
+{
+  "schema": 1,
+  "environment": {
+    "cpu": "AMD Ryzen 7 8840U w/ Radeon 780M Graphics",
+    "logical_cpus": 16,
+    "mem_total_mib": 15244.7,
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)"
+  },
+  "totals": {
+    "tests": 184,
+    "wall_s": 3.3502,
+    "cpu_s": 17.518,
+    "max_rss_mib": 174.99,
+    "read_mib": 0.0,
+    "write_mib": 0.04
+  },
+  "build": {
+    "wall_s": 0.1711,
+    "cpu_s": 0.1703,
+    "max_rss_mib": 90.71
+  },
+  "cold_jit": {
+    "wall_s": 8.7021,
+    "user_s": 124.4827,
+    "sys_s": 0.3563,
+    "cpu_s": 124.839,
+    "max_rss_mib": 233.66,
+    "read_mib": 0.0,
+    "write_mib": 0.0,
+    "minflt": 55358,
+    "majflt": 0,
+    "nvcsw": 1543,
+    "nivcsw": 6750,
+    "exit_code": 0,
+    "test": "ahead_of_upstream_is_ahead",
+    "passed": 1,
+    "failed": 0,
+    "note": "single git test with a fresh TMPDIR/component cache"
+  },
+  "suites": [
+    {
+      "name": "backupcrawl",
+      "tests": 6,
+      "wall_s": 0.002,
+      "cpu_s": 0.0035,
+      "max_rss_mib": 20.93,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "backupcrawl_core",
+      "tests": 3,
+      "wall_s": 0.0025,
+      "cpu_s": 0.0028,
+      "max_rss_mib": 20.93,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "backupcrawl_host",
+      "tests": 24,
+      "wall_s": 0.1045,
+      "cpu_s": 0.0144,
+      "max_rss_mib": 20.93,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "backupcrawl_plugin_example",
+      "tests": 6,
+      "wall_s": 0.0032,
+      "cpu_s": 0.0043,
+      "max_rss_mib": 20.93,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "backupcrawl_plugin_git",
+      "tests": 22,
+      "wall_s": 0.0034,
+      "cpu_s": 0.007,
+      "max_rss_mib": 20.93,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "backupcrawl_plugin_sdk",
+      "tests": 7,
+      "wall_s": 0.0015,
+      "cpu_s": 0.0018,
+      "max_rss_mib": 20.93,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "backupcrawl_test_components",
+      "tests": 0,
+      "wall_s": 0.0014,
+      "cpu_s": 0.0013,
+      "max_rss_mib": 20.93,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "backupcrawl_wit",
+      "tests": 1,
+      "wall_s": 0.0043,
+      "cpu_s": 0.0042,
+      "max_rss_mib": 20.93,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "cli",
+      "tests": 21,
+      "wall_s": 0.4392,
+      "cpu_s": 1.0787,
+      "max_rss_mib": 68.68,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "detector_walker",
+      "tests": 9,
+      "wall_s": 0.0019,
+      "cpu_s": 0.0038,
+      "max_rss_mib": 20.93,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "discovery",
+      "tests": 12,
+      "wall_s": 0.0028,
+      "cpu_s": 0.0124,
+      "max_rss_mib": 20.93,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "fixture_smoke",
+      "tests": 1,
+      "wall_s": 0.0166,
+      "cpu_s": 0.0169,
+      "max_rss_mib": 34.57,
+      "read_mib": 0.0,
+      "write_mib": 0.04
+    },
+    {
+      "name": "git_plugin",
+      "tests": 23,
+      "wall_s": 0.7335,
+      "cpu_s": 5.4594,
+      "max_rss_mib": 61.27,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "git_plugin_exec",
+      "tests": 13,
+      "wall_s": 1.4445,
+      "cpu_s": 10.1027,
+      "max_rss_mib": 59.77,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "runtime",
+      "tests": 15,
+      "wall_s": 0.1317,
+      "cpu_s": 0.2968,
+      "max_rss_mib": 55.72,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "trust",
+      "tests": 14,
+      "wall_s": 0.0044,
+      "cpu_s": 0.0118,
+      "max_rss_mib": 20.93,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "walker",
+      "tests": 6,
+      "wall_s": 0.0029,
+      "cpu_s": 0.0056,
+      "max_rss_mib": 20.93,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    }
+  ],
+  "artifacts": {
+    "target_bytes": 10748422149,
+    "wasm": [
+      {
+        "path": "crates/backupcrawl-cli/tests/fixtures/detectors/dotbak/dotbak.wasm",
+        "bytes": 108159
+      },
+      {
+        "path": "crates/backupcrawl-cli/tests/fixtures/plugins/alpha/alpha.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-cli/tests/fixtures/plugins/bad/bad.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-cli/tests/fixtures/plugins/demo/demo.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/explicit/bad-api/bad-api.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/explicit/bad-cap/bad-cap.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/explicit/broken/broken.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/explicit/git/git.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/explicit/just-wasm/just-wasm.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/explicit/unknown-keys/unknown-keys.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/system/chezmoi/chezmoi.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/system/pacman/pacman.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/user/git/git.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/user/pacman/pacman.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/test-detector.wasm",
+        "bytes": 100643
+      },
+      {
+        "path": "plugins/git/dist/git.wasm",
+        "bytes": 3393736
+      }
+    ]
+  }
+}

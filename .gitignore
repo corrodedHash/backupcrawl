@@ -4,3 +4,7 @@
 crates/test-components/src/bindings.rs
 crates/backupcrawl-plugin-sdk/example-plugin/src/bindings.rs
 plugins/*/src/bindings.rs
+
+# Python bytecode from the developer scripts.
+__pycache__/
+*.pyc

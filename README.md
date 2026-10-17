@@ -21,6 +21,21 @@ read [`docs/plugin-authoring.md`](docs/plugin-authoring.md).
 The binary ends up at `target/release/backupcrawl`. The git detector is embedded
 in the binary, so no plugin directory is required.
 
+## Tests
+
+    cargo test --workspace
+
+The suite is wasmtime- and git-fixture-heavy, so
+[`scripts/test-stats.py`](scripts/test-stats.py) records wall/CPU time, peak RSS,
+block I/O, build cost and the cold wasmtime JIT cost per test binary, and checks
+them against a committed baseline:
+
+    scripts/test-stats.py --check          # fail on regressions
+    scripts/test-stats.py --update-baseline
+
+See [`docs/test-metrics.md`](docs/test-metrics.md) for the metric definitions and
+the baseline policy.
+
 ## Usage
 
     backupcrawl [PATH]
