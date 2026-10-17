@@ -452,14 +452,8 @@ def compare(
             problems.append(
                 f"{label}: {old:.3f} -> {new:.3f} (+{(new / old - 1) * 100:.0f}%)"
             )
-    old_build = baseline.get("build", {})
-    new_build = report["build"]
-    if old_build.get("wall_s", 0) >= FLOORS["wall_s"] and new_build["wall_s"] > (
-        old_build["wall_s"] * (1 + wall_pct / 100)
-    ):
-        problems.append(
-            f"build wall: {old_build['wall_s']:.3f} -> {new_build['wall_s']:.3f}"
-        )
+    # Build cost is reported but not enforced: a source change legitimately
+    # triggers a large incremental/cold rebuild, while a no-op run is ~0.2 s.
     old_cold = baseline.get("cold_jit")
     new_cold = report.get("cold_jit")
     if old_cold and new_cold and old_cold.get("wall_s", 0) > 0:

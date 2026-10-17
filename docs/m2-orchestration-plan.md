@@ -25,7 +25,7 @@ Integration branch: `feat/rust-rewrite` in `/var/lib/opencode-agent/coding/backu
 
 | Task | Branch | Status |
 | --- | --- | --- |
-| M2.0 contract hardening | `feat/m2.0-contract-hardening` | not started |
+| M2.0 contract hardening | `feat/m2.0-contract-hardening` | done, merged as `fbc5dd2` |
 | M2 pacman + symlinks | `feat/m2-pacman-symlinks` | not started |
 | M4a parallel + progress | `feat/m4a-parallel-progress` | not started |
 | M3.1 chezmoi | `feat/m3.1-chezmoi` | not started |
@@ -95,3 +95,17 @@ Integration branch: `feat/rust-rewrite` in `/var/lib/opencode-agent/coding/backu
 
 - 2026-10-17: sequence recorded in `docs/rust-rewrite-plan.md` §12; M2.0/M2/M4a/M3 task
   breakdowns added; M4b and M5 marked deferred. Worktrees to be created per wave.
+- 2026-10-17: **M2.0 merged** (`fbc5dd2`, branch `feat/m2.0-contract-hardening`:
+  `2ec51a6`, `1cabe1a`, `a614168`). New `backupcrawl-host::fs` resolves `fs-read` specs
+  (`~` + shell globs), deduplicates nested roots to the broadest and preopens the crawl root plus
+  the resolved roots read-only at their absolute guest paths; unresolved specs warn. `stat` stays
+  unconditional and metadata-only. `Runtime::instantiate_with_fs`/`instantiate_plugin(root)` carry
+  the grants; the fixture component gained a `read` scenario proving inside/outside access; the
+  committed fixture was rebuilt reproducibly (139,443 bytes). `plugins info`/the trust prompt now
+  render the real scope; the bundled git manifest declares `fs-read = ["/"]`. The per-worker
+  lifecycle/cache contract is documented in the core trait, SDK, plugin-authoring guide and plan
+  §9. Acceptance on the merged tree: fmt, clippy `-D warnings`, 196 tests green, cold-JIT probe
+  9.1 s. Baseline refreshed in `docs/test-metrics/baseline.json` (196 tests, ~3.7 s warm wall,
+  ~17.9 s CPU, 175 MiB peak RSS, 14.7 GiB target). The new test metrics harness
+  (`scripts/test-stats.py`, `docs/test-metrics.md`) landed just before the merge and CI now runs
+  the suite through it.
