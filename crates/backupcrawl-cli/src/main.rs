@@ -2,6 +2,7 @@
 
 mod config;
 mod printer;
+mod progress;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, IsTerminal, Write};
@@ -13,7 +14,8 @@ use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
 use backupcrawl_core::detector::{DetectorSlot, Hooks};
 use backupcrawl_core::ignore::IgnoreMatcher;
-use backupcrawl_core::walker;
+use backupcrawl_core::progress::{NoProgress, ProgressSink};
+use backupcrawl_core::walker::{self, CrawlOutcome};
 use backupcrawl_host::discovery::{self, DiscoveredPlugin, DiscoveryOutcome, SearchPaths};
 use backupcrawl_host::trust::{self, PluginTrust, TrustPrompt, TrustRequest};
 use backupcrawl_host::{Limits, Runtime};
@@ -43,6 +45,14 @@ struct Cli {
     /// Also show clean (backed-up) claims in the panels.
     #[arg(long, short)]
     all: bool,
+
+    /// Number of crawl workers; 0 uses the number of available CPUs.
+    #[arg(long, default_value_t = 1, value_name = "N")]
+    jobs: usize,
+
+    /// Show live crawl progress on stderr (disabled when stderr is not a TTY).
+    #[arg(long)]
+    progress: bool,
 
     /// Extra ignore glob, repeatable; applied on top of the config file.
     #[arg(long, short, value_name = "GLOB")]
@@ -190,14 +200,16 @@ fn crawl(cli: &Cli) -> Result<()> {
     let plugins = ordered_plugins(&outcome, &enabled, &config.plugins.order);
     let trust = apply_trust(&context, &plugins, &outcome, &cli.trust_plugin, true)?;
 
-    // Build the detector slots and remember, in detector order, what happened to
-    // each plugin so the run report line can include skipped ones too.
+    // Build one detector set per worker. Every worker gets its own detector
+    // instances (one wasm `Store` per detector per worker, section 9); a plugin
+    // that cannot be instantiated is skipped once and never reaches the sets.
     enum Pending {
         Ran(usize),
         Skipped(String),
     }
 
-    let mut slots: Vec<DetectorSlot> = Vec::new();
+    let jobs = effective_jobs(cli.jobs);
+    let mut worker_sets: Vec<Vec<DetectorSlot>> = (0..jobs).map(|_| Vec::new()).collect();
     let mut pending: Vec<(String, Pending)> = Vec::new();
     let mut runtime: Option<Runtime> = None;
 
@@ -212,38 +224,61 @@ fn crawl(cli: &Cli) -> Result<()> {
         if runtime.is_none() {
             runtime = Some(Runtime::new(Limits::default())?);
         }
-        match runtime
-            .as_ref()
-            .expect("runtime")
-            .instantiate_plugin(plugin, &cli.path)
-        {
-            Ok(detector) => {
-                let index = slots.len();
-                slots.push(DetectorSlot::new(
+        let runtime = runtime.as_ref().expect("runtime");
+
+        // Instantiate `jobs` instances up front. The compiled component is
+        // cached on the runtime, so only the stores differ. Stop at the first
+        // failure: a plugin that cannot load is attempted once, not N times.
+        let mut instances = Vec::with_capacity(jobs);
+        let mut load_error = None;
+        for _ in 0..jobs {
+            match runtime.instantiate_plugin(plugin, &cli.path) {
+                Ok(detector) => instances.push(detector),
+                Err(err) => {
+                    load_error = Some(err);
+                    break;
+                }
+            }
+        }
+
+        let Some(load_error) = load_error else {
+            let index = worker_sets[0].len();
+            for (worker, detector) in worker_sets.iter_mut().zip(instances) {
+                worker.push(DetectorSlot::new(
                     plugin.name.clone(),
                     plugin_config(config, &plugin.name),
                     hooks_of(plugin),
                     Box::new(detector),
                 ));
-                pending.push((plugin.name.clone(), Pending::Ran(index)));
             }
-            Err(err) => {
-                eprintln!("warning: cannot load plugin `{}`: {err:#}", plugin.name);
-                pending.push((
-                    plugin.name.clone(),
-                    Pending::Skipped(format!("load failed: {err:#}")),
-                ));
-            }
-        }
+            pending.push((plugin.name.clone(), Pending::Ran(index)));
+            continue;
+        };
+
+        eprintln!(
+            "warning: cannot load plugin `{}`: {load_error:#}",
+            plugin.name
+        );
+        pending.push((
+            plugin.name.clone(),
+            Pending::Skipped(format!("load failed: {load_error:#}")),
+        ));
     }
 
-    let result = walker::scan(&cli.path, &matcher, &mut slots);
+    let progress: Box<dyn ProgressSink> = if cli.progress {
+        Box::new(progress::ProgressDisplay::stderr())
+    } else {
+        Box::new(NoProgress)
+    };
+    let CrawlOutcome { result, reports } =
+        walker::crawl(&cli.path, &matcher, worker_sets, progress.as_ref());
+    drop(progress);
 
     let run: Vec<PluginRunStatus> = pending
         .into_iter()
         .map(|(name, pending)| match pending {
             Pending::Skipped(reason) => PluginRunStatus::disabled(name, reason),
-            Pending::Ran(index) => PluginRunStatus::ran(name, &slots[index].detector.report()),
+            Pending::Ran(index) => PluginRunStatus::ran(name, &reports[index]),
         })
         .collect();
 
@@ -252,6 +287,18 @@ fn crawl(cli: &Cli) -> Result<()> {
         Format::Json => printer::print_json(&result)?,
     }
     Ok(())
+}
+
+/// Resolves `--jobs`: `0` asks for the available parallelism.
+fn effective_jobs(jobs: usize) -> usize {
+    if jobs == 0 {
+        std::thread::available_parallelism()
+            .map(|parallelism| parallelism.get())
+            .unwrap_or(1)
+            .max(1)
+    } else {
+        jobs
+    }
 }
 
 /// The plugin names the run explicitly asked for (flags first, then config),

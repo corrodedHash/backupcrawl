@@ -894,6 +894,117 @@ fn console_shows_the_symlink_panel_with_unmanaged_links() {
     assert!(!stdout.contains('\u{1b}'), "unexpected ANSI escapes");
 }
 
+// --- parallel crawl and progress (M4a) -------------------------------------
+
+/// Runs the dotbak fixture in JSON mode at `jobs` and returns stdout.
+fn crawl_fixture_json(root: &Path, xdg: &Path, jobs: &str) -> Vec<u8> {
+    let output = crawl_command(xdg)
+        .arg(root)
+        .args(["--format", "json", "--plugin-dir"])
+        .arg(detectors_fixture_dir())
+        .args([
+            "--plugins",
+            "dotbak",
+            "--trust-plugin",
+            "dotbak",
+            "--jobs",
+            jobs,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    output.stdout
+}
+
+#[test]
+fn jobs_4_produces_identical_json_to_jobs_1() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("tree");
+    fixture_tree(&root);
+    let xdg = tempfile::tempdir().unwrap();
+
+    let serial = crawl_fixture_json(&root, xdg.path(), "1");
+    let parallel = crawl_fixture_json(&root, xdg.path(), "4");
+
+    assert_eq!(
+        serial, parallel,
+        "JSON output must not depend on the worker count"
+    );
+    let json: Value = serde_json::from_slice(&parallel).unwrap();
+    assert_eq!(json["schema"], 1);
+}
+
+#[test]
+fn jobs_zero_uses_available_parallelism() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("tree");
+    fixture_tree(&root);
+
+    let json = run_json(
+        &root,
+        &[
+            std::ffi::OsStr::new("--no-plugins"),
+            std::ffi::OsStr::new("--jobs"),
+            std::ffi::OsStr::new("0"),
+        ],
+    );
+    assert!(loose_paths(&json).contains(&root.join("loose").display().to_string()));
+}
+
+#[test]
+fn progress_on_a_non_tty_emits_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("tree");
+    touch(&root.join("a.txt"));
+    let xdg = tempfile::tempdir().unwrap();
+
+    let output = crawl_command(xdg.path())
+        .arg(&root)
+        .args(["--no-plugins", "--progress"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(
+        output.stderr.is_empty(),
+        "non-TTY progress wrote to stderr: {:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(!stdout.contains("walking:"), "got:\n{stdout}");
+    assert!(!stdout.contains('\r'), "got carriage returns:\n{stdout:?}");
+    assert!(stdout.contains("Not backed up"), "got:\n{stdout}");
+}
+
+#[test]
+fn progress_with_json_does_not_corrupt_stdout() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("tree");
+    touch(&root.join("a.txt"));
+    let xdg = tempfile::tempdir().unwrap();
+
+    let output = crawl_command(xdg.path())
+        .arg(&root)
+        .args(["--format", "json", "--no-plugins", "--progress"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("walking:"));
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["schema"], 1);
+    assert!(loose_paths(&json).contains(&root.join("a.txt").display().to_string()));
+}
+
 #[cfg(unix)]
 #[test]
 fn symlinks_into_a_clean_pruning_claim_are_via_clean() {
