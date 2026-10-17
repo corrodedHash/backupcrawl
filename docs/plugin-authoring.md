@@ -7,10 +7,12 @@ result. This document is the hands-on guide; the design rationale lives in
 [`rust-rewrite-plan.md`](rust-rewrite-plan.md) (§3–§5).
 
 The bundled [`plugins/git`](../plugins/git) detector is the reference
-implementation, [`plugins/pacman`](../plugins/pacman) is the second bundled
-detector (native database parsing, no `exec`) and
-[`plugins/syncthing`](../plugins/syncthing) shows the `http` import talking to a
-localhost REST API. The SDK ships a complete worked example at
+implementation, [`plugins/pacman`](../plugins/pacman) is the native
+database-parsing detector (no `exec`), [`plugins/chezmoi`](../plugins/chezmoi)
+is the one bundled detector that uses `exec` (`chezmoi managed` / `chezmoi
+status`), and [`plugins/syncthing`](../plugins/syncthing) shows the `http`
+import talking to a localhost REST API. The SDK ships a complete worked example
+at
 `crates/backupcrawl-plugin-sdk/example-plugin`.
 
 ## The model: three questions per path
@@ -143,6 +145,13 @@ through the `Host` trait, and the host grants only what the manifest declares:
 | `cache_get`/`cache_set` | Persistent per-plugin key/value store under `$XDG_CACHE_HOME/backupcrawl/plugins/<name>/` | `cache = true` |
 | `http(request)` | HTTP to an allowlisted origin (localhost-only by default) | `http = ["host"]` |
 | `log(level, message)` | Structured logging | always |
+
+The host runs `exec` children with an **empty environment**; a plugin that needs
+an environment variable must pass it explicitly in the request (the bundled
+chezmoi detector forwards `HOME` so the child finds its config). The component
+itself sees only the path variables `HOME`, `STCONFDIR` and
+`XDG_CONFIG_HOME`/`XDG_STATE_HOME`/`XDG_DATA_HOME`; do not expect any other host
+environment value.
 
 The syncthing detector is the worked example for `http`: it queries
 `GET http://127.0.0.1:8384/rest/db/status?folder=<id>` with an `X-API-Key`
@@ -284,6 +293,7 @@ scripts are the working reference:
 - `scripts/build-git-plugin.sh` — bundled git detector, `--target wasm32-wasip2`,
   reproducible with `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1`.
 - `scripts/build-pacman-plugin.sh` — bundled pacman detector, same pattern.
+- `scripts/build-chezmoi-plugin.sh` — bundled chezmoi detector, same pattern.
 - `scripts/build-syncthing-plugin.sh` — bundled syncthing detector, same
   pattern; its golden tests run the component against a local fake REST daemon.
 

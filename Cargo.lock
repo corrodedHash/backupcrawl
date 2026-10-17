@@ -199,6 +199,7 @@ dependencies = [
  "hex",
  "log",
  "serde",
+ "serde_json",
  "sha2 0.11.0",
  "tempfile",
  "toml 0.8.23",
@@ -206,6 +207,17 @@ dependencies = [
  "url",
  "wasmtime",
  "wasmtime-wasi",
+]
+
+[[package]]
+name = "backupcrawl-plugin-chezmoi"
+version = "0.3.0"
+dependencies = [
+ "backupcrawl-plugin-sdk",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml 0.8.23",
 ]
 
 [[package]]

@@ -12,14 +12,37 @@
 # `wasm_build_env "$root"`. The function is idempotent, so a script that calls
 # another build script does not append the flags twice.
 
+# Resolve the target directory cargo will actually use. An explicit
+# CARGO_TARGET_DIR wins; otherwise ask cargo, so a `[build] target-dir` in
+# `.cargo/config.toml` (e.g. the machine-level config that points every
+# worktree at the shared build cache) is honored instead of assuming the
+# in-tree `target/`. Falls back to the in-tree default if cargo cannot be
+# queried.
+cargo_target_dir() {
+    if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+        printf '%s' "$CARGO_TARGET_DIR"
+        return 0
+    fi
+    local root="${1:-$PWD}"
+    local resolved
+    resolved="$(cargo metadata --no-deps --format-version 1 \
+        --manifest-path "$root/Cargo.toml" 2>/dev/null \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])' 2>/dev/null)"
+    printf '%s' "${resolved:-$root/target}"
+}
+
 wasm_build_env() {
     if [[ -n "${BACKUPCRAWL_WASM_BUILD_ENV:-}" ]]; then
         return 0
     fi
     local root="$1"
-    local target_dir="${CARGO_TARGET_DIR:-$root/target}"
+    local target_dir
+    target_dir="$(cargo_target_dir "$root")"
     local cargo_home="${CARGO_HOME:-$HOME/.cargo}"
     local rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
+    # Pin CARGO_TARGET_DIR to the resolved path so the artifact lookups below
+    # and the nested cargo-component invocation agree with the remap prefixes.
+    export CARGO_TARGET_DIR="$target_dir"
     # Most specific prefixes first: when the target directory lives inside the
     # checkout, its paths must map to `/target`, not to `/src/target`.
     export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=${cargo_home}=/cargo --remap-path-prefix=${rustup_home}=/rustup --remap-path-prefix=${target_dir}=/target --remap-path-prefix=${root}=/src"

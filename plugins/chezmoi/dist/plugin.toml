@@ -1,0 +1,29 @@
+[plugin]
+name = "chezmoi"
+version = "0.1.0"
+api = "1"
+description = "Chezmoi-managed dotfiles and their apply state"
+license = "MIT"
+
+[hooks]
+# A managed directory is claimed but not pruned: unmanaged files inside it are
+# still reported as "not backed up".
+dir = true
+file = true
+# `symlink_` source entries are managed target paths; claim them like files.
+symlink = true
+# git (10) and pacman (20) answer first; chezmoi only sees the rest.
+priority = 30
+
+[capabilities]
+# chezmoi is the one bundled detector that keeps `exec`: a faithful native
+# implementation would have to reimplement the source-state filename encoding
+# and template evaluation (§7.4). This is the whole process allowlist.
+exec = ["chezmoi"]
+# Chezmoi reads the destination tree under `$HOME`; the crawl root is always
+# granted on top of this (M2.0).
+fs-read = ["~"]
+http = []
+# The managed/status snapshot is cached, keyed by the source/dest directory
+# mtimes and the include-types setting.
+cache = true

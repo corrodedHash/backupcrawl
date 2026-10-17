@@ -255,6 +255,11 @@ Design notes:
 - **Grants are visible.** The manifest's resolved `fs-read` roots and `exec`/`http` lists are
   printed by `plugins info` and the trust prompt, together with the manifest hash. Unresolved
   specs are warnings; a plugin that declares `/` is shown as `read /`.
+- **Environment is path configuration only.** The WASI context has no inherited environment
+  except `HOME`, `STCONFDIR` and the `XDG_CONFIG_HOME`/`XDG_STATE_HOME`/`XDG_DATA_HOME` path
+  variables, so detectors can resolve `~` and their tool-specific config roots without leaking
+  credentials or arbitrary host state. `exec` children still start from an empty environment and
+  receive only the request's explicit variables.
 - **State lives in the plugin instance** (one wasm instance = one mutable state); `init` builds
   caches, `finish` may flush to the host cache.
 - **Bulk calls are an optimization only.** `check-files` exists so the host can pass all files of
@@ -793,6 +798,8 @@ buggy or malicious. The host protects the machine.
   is nothing to escape to). The resolved `fs-read` roots are printed in `plugins info` and the
   trust prompt, and they are the actual content scope; a plugin that declares `/` is shown as
   `read /`. The metadata `stat` import remains unrestricted and metadata-only.
+- **The guest environment is path configuration only** (`HOME`, `STCONFDIR`, `XDG_*`), never the
+  host's full environment; `exec` children still get exactly the variables in the request.
 - **exec is the escape hatch.** A spawned `chezmoi` (or any allowlisted program a third-party
   plugin declares) runs with the user's rights and is *not* sandboxed. This is why the bundled git
   and pacman detectors avoid exec and why the capability must be loud: `backupcrawl plugins info

@@ -10,6 +10,7 @@ members = [
     "crates/test-components",
     "plugins/git",
     "plugins/pacman",
+    "plugins/chezmoi",
     "plugins/syncthing",
 ]
 # The gix feasibility spike (M1.7) is a standalone workspace with its own lockfile

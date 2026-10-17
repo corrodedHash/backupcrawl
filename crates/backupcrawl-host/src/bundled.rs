@@ -8,12 +8,12 @@
 //! # Status
 //!
 //! The registry is filled by M1.8 with the git detector, by M2.1 with the
-//! pacman detector and by M3.2 with the syncthing detector. `plugins/git`,
-//! `plugins/pacman` and `plugins/syncthing` are built with `cargo component
-//! build --target wasm32-wasip2 --release` (see `scripts/build-git-plugin.sh`,
-//! `scripts/build-pacman-plugin.sh` and `scripts/build-syncthing-plugin.sh`), the
+//! pacman detector, by M3.1 with the chezmoi detector and by M3.2 with the
+//! syncthing detector. `plugins/git`, `plugins/pacman`, `plugins/chezmoi` and
+//! `plugins/syncthing` are built with `cargo component build --target
+//! wasm32-wasip2 --release` (see the matching `scripts/build-*-plugin.sh`), the
 //! component is copied to `<plugin>/dist/<name>.wasm` and its manifest to
-//! `<plugin>/dist/plugin.toml`, and both are embedded below.
+//! `<plugin>/dist/plugin.toml`, and all are embedded below.
 //!
 //! `include_bytes!` paths are relative to this source file
 //! (`crates/backupcrawl-host/src/bundled.rs`), so `../../../plugins/...`
@@ -41,6 +41,11 @@ pub const REGISTRY: &[BundledPlugin] = &[
         name: "pacman",
         manifest: include_bytes!("../../../plugins/pacman/dist/plugin.toml"),
         wasm: include_bytes!("../../../plugins/pacman/dist/pacman.wasm"),
+    },
+    BundledPlugin {
+        name: "chezmoi",
+        manifest: include_bytes!("../../../plugins/chezmoi/dist/plugin.toml"),
+        wasm: include_bytes!("../../../plugins/chezmoi/dist/chezmoi.wasm"),
     },
     BundledPlugin {
         name: "syncthing",
