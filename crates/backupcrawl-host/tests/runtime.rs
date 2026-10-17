@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 
 use backupcrawl_core::Status;
 use backupcrawl_host::{
-    CapabilityPolicy, Claim, DetectorError, Limits, LinkInfo, Runtime, ScanInfo, WasmDetector,
+    CapabilityPolicy, Claim, DetectorError, FsGrants, Limits, LinkInfo, Runtime, ScanInfo,
+    WasmDetector,
 };
 
 fn fixture_bytes() -> Vec<u8> {
@@ -234,6 +235,68 @@ fn stat_import_reports_metadata() {
     assert!(attr(&claim, "uid").is_some());
     assert!(attr(&claim, "gid").is_some());
     assert!(attr(&claim, "nlink").is_some());
+}
+
+#[test]
+fn fs_read_content_is_scoped_to_granted_roots() {
+    let tmp = tempfile::tempdir().unwrap();
+    let granted = tmp.path().join("granted");
+    let outside = tmp.path().join("outside");
+    std::fs::create_dir_all(&granted).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let inside = granted.join("inside.txt");
+    std::fs::write(&inside, b"inside-content").unwrap();
+    let secret = outside.join("secret.txt");
+    std::fs::write(&secret, b"secret-content").unwrap();
+
+    let (runtime, _dir) = runtime(Limits::default());
+    let grants = FsGrants::from_roots([granted]);
+
+    // Content inside the granted root is readable through `std::fs`.
+    let mut inside_detector = runtime
+        .instantiate_with_fs(
+            &fixture_bytes(),
+            "fixture",
+            CapabilityPolicy::none(),
+            &grants,
+        )
+        .expect("instantiate fixture");
+    inside_detector
+        .init(&scan_info(&[
+            ("scenario", "read"),
+            ("read-path", inside.to_str().unwrap()),
+        ]))
+        .unwrap();
+    let claim = inside_detector
+        .check_file(Path::new("/x"))
+        .unwrap()
+        .expect("read claim");
+    assert_eq!(attr(&claim, "content"), Some("inside-content"));
+
+    // Content outside the granted roots is inaccessible, even to `std::fs`.
+    let mut outside_detector = runtime
+        .instantiate_with_fs(
+            &fixture_bytes(),
+            "fixture",
+            CapabilityPolicy::none(),
+            &grants,
+        )
+        .expect("instantiate fixture");
+    outside_detector
+        .init(&scan_info(&[
+            ("scenario", "read"),
+            ("read-path", secret.to_str().unwrap()),
+        ]))
+        .unwrap();
+    let claim = outside_detector
+        .check_file(Path::new("/x"))
+        .unwrap()
+        .expect("error claim");
+    assert_eq!(claim.status, Status::Unknown);
+    assert!(
+        attr(&claim, "error").is_some(),
+        "reading outside the grant must fail, got: {claim:?}"
+    );
 }
 
 #[test]

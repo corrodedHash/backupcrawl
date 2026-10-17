@@ -215,7 +215,7 @@ fn crawl(cli: &Cli) -> Result<()> {
         match runtime
             .as_ref()
             .expect("runtime")
-            .instantiate_plugin(plugin)
+            .instantiate_plugin(plugin, &cli.path)
         {
             Ok(detector) => {
                 let index = slots.len();

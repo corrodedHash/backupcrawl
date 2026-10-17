@@ -39,6 +39,7 @@ env_logger = "0.11"
 # hashes racily-clean worktree files while comparing them to the index.
 # gix uses `memmap2` and `filetime` unconditionally; both are patched below.
 gix = { version = "0.89", default-features = false, features = ["basic", "status", "sha1"] }
+glob = "0.3"
 globset = "0.4"
 hex = "0.4"
 libc = "0.2"

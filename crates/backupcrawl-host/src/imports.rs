@@ -15,8 +15,9 @@
 //! | `cache-get`/`cache-set` | `[capabilities] cache` | persistent per-plugin KV |
 //! | `http` | `[capabilities] http` | origin allowlist, localhost-only by default |
 //!
-//! Filesystem *content* is not an import: the runtime gives every detector a
-//! read-only WASI preopen of `/` ([`crate::runtime`]), so plugins read files with
+//! Filesystem *content* is not an import: since M2.0 the runtime grants
+//! read-only WASI preopens for the crawl root plus the resolved
+//! `[capabilities].fs-read` roots ([`crate::fs`]), so plugins read files with
 //! `std::fs` and this module only fills the metadata gap WASI 0.2 leaves.
 //!
 //! # Trust model
@@ -42,6 +43,7 @@ use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use crate::bindings::host_imports::{
     ExecRequest, ExecResult, FileInfo, FileKind, Host, HttpRequest, HttpResponse,
 };
+use crate::fs::{FsGrants, FsReadScope};
 use crate::limits::Limits;
 use crate::manifest::{Capabilities, Manifest};
 
@@ -55,6 +57,7 @@ use crate::manifest::{Capabilities, Manifest};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilityPolicy {
     exec: Vec<String>,
+    fs_read: Vec<String>,
     http: Vec<String>,
     http_localhost_only: bool,
     cache: bool,
@@ -65,6 +68,7 @@ impl Default for CapabilityPolicy {
     fn default() -> Self {
         Self {
             exec: Vec::new(),
+            fs_read: Vec::new(),
             http: Vec::new(),
             http_localhost_only: true,
             cache: false,
@@ -91,6 +95,7 @@ impl CapabilityPolicy {
     pub fn from_capabilities(capabilities: &Capabilities) -> Self {
         Self {
             exec: capabilities.exec.clone(),
+            fs_read: capabilities.fs_read.clone(),
             http: capabilities.http.clone(),
             http_localhost_only: true,
             cache: capabilities.cache,
@@ -105,6 +110,22 @@ impl CapabilityPolicy {
         S: Into<String>,
     {
         self.exec = programs.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Replaces the `fs-read` spec list.
+    ///
+    /// Specs are resolved to read-only preopens at instantiation (see
+    /// [`crate::fs`]); a spec that does not resolve is a warning and grants
+    /// nothing. `Runtime::instantiate` grants exactly these roots;
+    /// `Runtime::instantiate_plugin` additionally grants the crawl root.
+    #[must_use]
+    pub fn with_fs_read<I, S>(mut self, specs: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.fs_read = specs.into_iter().map(Into::into).collect();
         self
     }
 
@@ -151,6 +172,11 @@ impl CapabilityPolicy {
     /// The `exec` program allowlist.
     pub fn exec_allowlist(&self) -> &[String] {
         &self.exec
+    }
+
+    /// The declared `fs-read` specs, resolved at instantiation.
+    pub fn fs_read_specs(&self) -> &[String] {
+        &self.fs_read
     }
 
     /// The `http` origin allowlist.
@@ -223,10 +249,13 @@ pub struct HostState {
 }
 
 impl HostState {
-    /// Builds the store data for `plugin_name`.
+    /// Builds the store data for `plugin_name`, granting the policy's declared
+    /// `fs-read` roots (no crawl root).
     ///
-    /// The WASI context has an **empty environment and argument list** and a
-    /// **read-only preopen of `/`** (§5.1, A.7). `cache_root` is the base cache
+    /// This is the constructor the runtime uses for the test-oriented
+    /// `Runtime::instantiate`; the crawl-aware instantiation goes through
+    /// [`HostState::with_grants`]. The WASI context always has an **empty
+    /// environment and argument list**. `cache_root` is the base cache
     /// directory (`$XDG_CACHE_HOME/backupcrawl/plugins` by default); each plugin
     /// gets a subdirectory named after itself.
     pub fn new(
@@ -235,12 +264,41 @@ impl HostState {
         cache_root: &Path,
         limits: &Limits,
     ) -> anyhow::Result<Self> {
+        let scope = FsReadScope::resolve(policy.fs_read_specs());
+        Self::with_grants(
+            plugin_name,
+            policy,
+            cache_root,
+            limits,
+            &FsGrants::for_scope(&scope),
+        )
+    }
+
+    /// Builds the store data with an explicit set of read-only preopens.
+    ///
+    /// Every [`FsRoot`](crate::fs::FsRoot) is preopened read-only at its own
+    /// absolute guest path, so `std::fs`/`gix` absolute paths keep working.
+    /// Roots outside the granted set are invisible to the guest; the metadata
+    /// `stat` import stays unconditional.
+    pub fn with_grants(
+        plugin_name: impl Into<String>,
+        policy: CapabilityPolicy,
+        cache_root: &Path,
+        limits: &Limits,
+        grants: &FsGrants,
+    ) -> anyhow::Result<Self> {
         let plugin_name = plugin_name.into();
 
         let mut ctx = WasiCtxBuilder::new();
-        // Empty environment/args are the builder default; only the preopen is
-        // added. Read-only makes writes through `std::fs` fail in `cap-std`.
-        ctx.preopened_dir("/", "/", FsPerms::ReadOnly)?;
+        // Empty environment/args are the builder default; read-only preopens
+        // make writes through `std::fs` fail in `cap-std`.
+        for root in grants.roots() {
+            ctx.preopened_dir(
+                &root.host,
+                root.guest.to_string_lossy().as_ref(),
+                FsPerms::ReadOnly,
+            )?;
+        }
         let ctx = ctx.build();
 
         let cache = PluginCache::new(cache_root.join(percent_encode(&plugin_name)), policy.cache);

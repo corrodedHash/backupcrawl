@@ -3,8 +3,10 @@
 
 use std::collections::{BTreeMap, VecDeque};
 use std::fs;
+use std::path::PathBuf;
 
 use backupcrawl_host::discovery::{DiscoveredPlugin, PluginSource};
+use backupcrawl_host::fs::FsReadScope;
 use backupcrawl_host::manifest::Manifest;
 use backupcrawl_host::trust::{
     self, TrustPrompt, TrustRequest, TrustState, hash_manifest, load_trust_table, save_trust_hash,
@@ -225,10 +227,15 @@ fn prompt_renders_exec_first_then_fs_http_and_hash() {
     let demo = plugin("demo", DEMO, PluginSource::Explicit);
     let hash = hash_manifest(DEMO.as_bytes());
     let state = TrustState::Unknown;
+    let scope = FsReadScope {
+        roots: vec![PathBuf::from("/")],
+        unresolved: Vec::new(),
+    };
     let request = TrustRequest {
         plugin: &demo,
         hash: &hash,
         state: &state,
+        fs_scope: &scope,
     };
     let rendered = request.render();
 
@@ -248,6 +255,37 @@ fn prompt_renders_exec_first_then_fs_http_and_hash() {
 }
 
 #[test]
+fn prompt_shows_scoped_roots_and_marks_unresolved_specs() {
+    let demo = plugin("demo", DEMO, PluginSource::Explicit);
+    let hash = hash_manifest(DEMO.as_bytes());
+    let state = TrustState::Unknown;
+    let scope = FsReadScope {
+        roots: vec![
+            PathBuf::from("/var/lib/pacman"),
+            PathBuf::from("/srv/repos"),
+        ],
+        unresolved: vec!["~/.config/missing".to_owned()],
+    };
+    let request = TrustRequest {
+        plugin: &demo,
+        hash: &hash,
+        state: &state,
+        fs_scope: &scope,
+    };
+
+    let rendered = request.render();
+    assert!(
+        rendered.contains("read /var/lib/pacman, /srv/repos"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("unresolved: ~/.config/missing"),
+        "{rendered}"
+    );
+    assert!(!rendered.contains("documented intent"), "{rendered}");
+}
+
+#[test]
 fn prompt_mentions_the_previous_hash_on_change() {
     let demo = plugin("demo", DEMO, PluginSource::Explicit);
     let hash = hash_manifest(DEMO.as_bytes());
@@ -255,10 +293,12 @@ fn prompt_mentions_the_previous_hash_on_change() {
     let state = TrustState::Changed {
         previous: old.to_owned(),
     };
+    let scope = FsReadScope::resolve(&demo.manifest.capabilities.fs_read);
     let request = TrustRequest {
         plugin: &demo,
         hash: &hash,
         state: &state,
+        fs_scope: &scope,
     };
 
     let rendered = request.render();

@@ -13,6 +13,7 @@
 //! | `trap` | checks abort (a wasm trap) |
 //! | `loop` | checks spin forever (fuel exhaustion / cancellation) |
 //! | `stat` | calls `host.stat` on `stat-path`; returns metadata as attrs |
+//! | `read` | reads `read-path` with `std::fs`; returns `content` or an `error` |
 //! | `exec` | calls `host.exec` for `program`/`args`; returns code/streams |
 //! | `cache` | `cache-get`/`cache-set` round-trip for `cache-key`/`cache-value` |
 //! | `http` | calls `host.http` for `url`; returns status/body |
@@ -22,11 +23,13 @@
 //! import are returned as an `unknown` claim with an `error` attribute so the
 //! host tests can assert on the message.
 //!
-//! Nothing beyond the `host` interface is imported (no `std::fs`). The wasm-only
-//! glue is gated with `#[cfg(target_family = "wasm")]` so plain `cargo
-//! clippy`/`cargo test` compile this crate as an empty library; only `cargo
-//! component build` (wasm32-wasip1) sees the component. Rebuild and refresh the
-//! checked-in artifact with `scripts/build-test-components.sh`.
+//! The `read` scenario is the one place that touches file *content*: it uses
+//! `std::fs` directly (WASI preopens), and its success/failure proves the host
+//! granted exactly the roots it should. The wasm-only glue is gated with
+//! `#[cfg(target_family = "wasm")]` so plain `cargo clippy`/`cargo test`
+//! compile this crate as an empty library; only `cargo component build`
+//! (wasm32-wasip1) sees the component. Rebuild and refresh the checked-in
+//! artifact with `scripts/build-test-components.sh`.
 
 #[cfg(target_family = "wasm")]
 mod component {
@@ -124,6 +127,19 @@ mod component {
                         )))
                     }
                     Err(message) => Ok(Some(error_claim(&message))),
+                }
+            }
+            "read" => {
+                let target = config("read-path").unwrap_or_else(|| path.to_string());
+                match std::fs::read_to_string(&target) {
+                    Ok(content) => {
+                        let len = content.len().to_string();
+                        Ok(Some(claim(
+                            Status::Dirty,
+                            vec![attr("content", content), attr("len", len)],
+                        )))
+                    }
+                    Err(err) => Ok(Some(error_claim(&format!("read `{target}`: {err}")))),
                 }
             }
             "exec" => {
