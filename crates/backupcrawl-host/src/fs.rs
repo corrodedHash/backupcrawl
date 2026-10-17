@@ -156,7 +156,11 @@ impl FsGrants {
     /// paths match the paths the walker hands to detectors.
     pub fn for_scan(crawl_root: &Path, scope: &FsReadScope) -> Self {
         let mut paths: Vec<PathBuf> = Vec::new();
-        if let Ok(root) = std::path::absolute(crawl_root) {
+        // A crawl root that is not an existing directory cannot be preopened
+        // (for example a single-file crawl); it simply contributes no grant.
+        if let Ok(root) = std::path::absolute(crawl_root)
+            && root.is_dir()
+        {
             paths.push(root);
         }
         paths.extend(scope.roots.iter().cloned());
