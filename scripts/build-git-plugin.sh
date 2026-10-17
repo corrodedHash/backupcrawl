@@ -16,6 +16,12 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
+# Trim machine-specific embedded paths so the committed artifact is
+# reproducible across checkouts.
+# shellcheck source=scripts/wasm-build-env.sh
+. "$root/scripts/wasm-build-env.sh"
+wasm_build_env "$root"
+
 dist="plugins/git/dist"
 
 # The committed artifact is the release component; default to it so a bare

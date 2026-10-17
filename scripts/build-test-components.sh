@@ -13,16 +13,15 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
+# Trim machine-specific embedded paths (and pick a single codegen unit) so the
+# committed artifact is reproducible across checkouts.
+# shellcheck source=scripts/wasm-build-env.sh
+. "$root/scripts/wasm-build-env.sh"
+wasm_build_env "$root"
+
 target_dir="${CARGO_TARGET_DIR:-$root/target}"
 artifact="$target_dir/wasm32-wasip1/release/backupcrawl_test_components.wasm"
 fixture="$root/crates/backupcrawl-host/tests/fixtures/test-detector.wasm"
-
-# Build with a single codegen unit. With multiple units, LLVM appends
-# `.llvm.<hash>` suffixes to colliding symbol names, and that hash depends on the
-# checkout/target path; the resulting artifact would then differ between
-# machines and the committed `git diff --exit-code` staleness check would fail.
-# One codegen unit removes those symbols and makes the component reproducible.
-export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
 
 cargo component build --release -p backupcrawl-test-components
 

@@ -9,29 +9,29 @@
   },
   "totals": {
     "tests": 259,
-    "wall_s": 5.4426,
-    "cpu_s": 20.3348,
-    "max_rss_mib": 178.32,
+    "wall_s": 5.5517,
+    "cpu_s": 20.5644,
+    "max_rss_mib": 178.1,
     "read_mib": 0.0,
-    "write_mib": 0.08
+    "write_mib": 0.46
   },
   "build": {
-    "wall_s": 0.183,
-    "cpu_s": 0.1827,
-    "max_rss_mib": 91.96
+    "wall_s": 0.1807,
+    "cpu_s": 0.1805,
+    "max_rss_mib": 92.13
   },
   "cold_jit": {
-    "wall_s": 9.0026,
-    "user_s": 127.4533,
-    "sys_s": 0.4354,
-    "cpu_s": 127.8888,
-    "max_rss_mib": 232.83,
+    "wall_s": 9.2509,
+    "user_s": 123.8328,
+    "sys_s": 0.4598,
+    "cpu_s": 124.2927,
+    "max_rss_mib": 245.46,
     "read_mib": 0.0,
     "write_mib": 0.0,
-    "minflt": 57577,
+    "minflt": 56367,
     "majflt": 0,
-    "nvcsw": 1620,
-    "nivcsw": 17048,
+    "nvcsw": 1679,
+    "nivcsw": 19909,
     "exit_code": 0,
     "test": "ahead_of_upstream_is_ahead",
     "passed": 1,
@@ -42,54 +42,54 @@
     {
       "name": "backupcrawl",
       "tests": 7,
-      "wall_s": 0.0026,
-      "cpu_s": 0.0041,
-      "max_rss_mib": 20.4,
+      "wall_s": 0.002,
+      "cpu_s": 0.0034,
+      "max_rss_mib": 20.5,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "backupcrawl_core",
       "tests": 4,
-      "wall_s": 0.0017,
-      "cpu_s": 0.0019,
-      "max_rss_mib": 20.4,
+      "wall_s": 0.0019,
+      "cpu_s": 0.0021,
+      "max_rss_mib": 20.5,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "backupcrawl_host",
       "tests": 32,
-      "wall_s": 0.1044,
-      "cpu_s": 0.0154,
-      "max_rss_mib": 20.4,
+      "wall_s": 0.1043,
+      "cpu_s": 0.0142,
+      "max_rss_mib": 20.5,
       "read_mib": 0.0,
-      "write_mib": 0.04
+      "write_mib": 0.08
     },
     {
       "name": "backupcrawl_plugin_example",
       "tests": 6,
-      "wall_s": 0.003,
-      "cpu_s": 0.004,
-      "max_rss_mib": 20.4,
+      "wall_s": 0.0026,
+      "cpu_s": 0.0037,
+      "max_rss_mib": 20.5,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "backupcrawl_plugin_git",
       "tests": 22,
-      "wall_s": 0.0042,
-      "cpu_s": 0.0078,
-      "max_rss_mib": 20.4,
+      "wall_s": 0.004,
+      "cpu_s": 0.0083,
+      "max_rss_mib": 20.5,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "backupcrawl_plugin_pacman",
       "tests": 30,
-      "wall_s": 0.0032,
+      "wall_s": 0.0029,
       "cpu_s": 0.0075,
-      "max_rss_mib": 20.4,
+      "max_rss_mib": 20.5,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
@@ -97,79 +97,79 @@
       "name": "backupcrawl_plugin_sdk",
       "tests": 7,
       "wall_s": 0.0015,
-      "cpu_s": 0.0018,
-      "max_rss_mib": 20.4,
+      "cpu_s": 0.002,
+      "max_rss_mib": 20.5,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "backupcrawl_test_components",
       "tests": 0,
-      "wall_s": 0.0014,
-      "cpu_s": 0.0013,
-      "max_rss_mib": 20.4,
+      "wall_s": 0.0015,
+      "cpu_s": 0.0014,
+      "max_rss_mib": 20.5,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "backupcrawl_wit",
       "tests": 1,
-      "wall_s": 0.0041,
-      "cpu_s": 0.004,
-      "max_rss_mib": 20.4,
+      "wall_s": 0.0036,
+      "cpu_s": 0.0035,
+      "max_rss_mib": 20.5,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "cli",
       "tests": 29,
-      "wall_s": 2.4238,
-      "cpu_s": 4.1166,
-      "max_rss_mib": 116.18,
+      "wall_s": 2.4861,
+      "cpu_s": 4.2097,
+      "max_rss_mib": 116.54,
       "read_mib": 0.0,
-      "write_mib": 0.0
+      "write_mib": 0.01
     },
     {
       "name": "detector_walker",
       "tests": 17,
-      "wall_s": 0.0025,
-      "cpu_s": 0.0083,
-      "max_rss_mib": 20.4,
+      "wall_s": 0.0026,
+      "cpu_s": 0.0078,
+      "max_rss_mib": 20.5,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "discovery",
       "tests": 12,
-      "wall_s": 0.0027,
-      "cpu_s": 0.011,
-      "max_rss_mib": 20.4,
+      "wall_s": 0.0034,
+      "cpu_s": 0.0139,
+      "max_rss_mib": 20.5,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "fixture_smoke",
       "tests": 1,
-      "wall_s": 0.0216,
-      "cpu_s": 0.0217,
-      "max_rss_mib": 35.5,
+      "wall_s": 0.0221,
+      "cpu_s": 0.0223,
+      "max_rss_mib": 35.42,
       "read_mib": 0.0,
       "write_mib": 0.04
     },
     {
       "name": "git_plugin",
       "tests": 23,
-      "wall_s": 0.7421,
-      "cpu_s": 5.6853,
-      "max_rss_mib": 61.98,
+      "wall_s": 0.7516,
+      "cpu_s": 5.7951,
+      "max_rss_mib": 61.55,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "git_plugin_exec",
       "tests": 13,
-      "wall_s": 1.2839,
-      "cpu_s": 9.2144,
+      "wall_s": 1.2709,
+      "cpu_s": 9.2247,
       "max_rss_mib": 59.27,
       "read_mib": 0.0,
       "write_mib": 0.0
@@ -177,55 +177,55 @@
     {
       "name": "pacman_plugin",
       "tests": 13,
-      "wall_s": 0.0518,
-      "cpu_s": 0.2903,
-      "max_rss_mib": 48.21,
+      "wall_s": 0.0533,
+      "cpu_s": 0.2951,
+      "max_rss_mib": 48.78,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "parallel_walker",
       "tests": 4,
-      "wall_s": 0.1649,
-      "cpu_s": 0.0085,
-      "max_rss_mib": 20.4,
+      "wall_s": 0.164,
+      "cpu_s": 0.008,
+      "max_rss_mib": 20.5,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "runtime",
       "tests": 16,
-      "wall_s": 0.1434,
-      "cpu_s": 0.3989,
-      "max_rss_mib": 59.55,
+      "wall_s": 0.1371,
+      "cpu_s": 0.3759,
+      "max_rss_mib": 56.82,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "trust",
       "tests": 15,
-      "wall_s": 0.0038,
-      "cpu_s": 0.0137,
-      "max_rss_mib": 20.4,
+      "wall_s": 0.0042,
+      "cpu_s": 0.0136,
+      "max_rss_mib": 20.5,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "walker",
       "tests": 6,
-      "wall_s": 0.0025,
-      "cpu_s": 0.0048,
-      "max_rss_mib": 20.4,
+      "wall_s": 0.0029,
+      "cpu_s": 0.0054,
+      "max_rss_mib": 20.5,
       "read_mib": 0.0,
       "write_mib": 0.0
     }
   ],
   "artifacts": {
-    "target_bytes": 33678131363,
+    "target_bytes": 34058171022,
     "wasm": [
       {
         "path": "crates/backupcrawl-cli/tests/fixtures/detectors/dotbak/dotbak.wasm",
-        "bytes": 108159
+        "bytes": 103877
       },
       {
         "path": "crates/backupcrawl-cli/tests/fixtures/plugins/alpha/alpha.wasm",
@@ -281,15 +281,15 @@
       },
       {
         "path": "crates/backupcrawl-host/tests/fixtures/test-detector.wasm",
-        "bytes": 139443
+        "bytes": 139379
       },
       {
         "path": "plugins/git/dist/git.wasm",
-        "bytes": 3393736
+        "bytes": 3386440
       },
       {
         "path": "plugins/pacman/dist/pacman.wasm",
-        "bytes": 423949
+        "bytes": 423245
       }
     ]
   }

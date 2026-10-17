@@ -271,8 +271,12 @@ scripts are the working reference:
 - `scripts/build-pacman-plugin.sh` — bundled pacman detector, same pattern.
 
 > Reproducibility: the committed fixture artifacts are part of the repo and CI
-> fails if they are stale. Build the bundled detectors through their scripts so
-> the single-codegen-unit setting is applied.
+> fails if they are stale. Build the bundled detectors through their scripts:
+> they source `scripts/wasm-build-env.sh`, which applies a single release codegen
+> unit and remaps the machine-specific `CARGO_HOME`, `RUSTUP_HOME`, checkout and
+> target prefixes to stable placeholders. rustc otherwise embeds absolute paths
+> in panic locations, so the same source would produce different bytes on a
+> different machine and the CI staleness check would fail.
 
 ## Installing, discovery and trust
 
