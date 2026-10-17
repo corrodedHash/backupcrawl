@@ -24,8 +24,10 @@ processes and `git` invocations. For each suite the script records:
 It also records:
 
 * the **build** step (`cargo test --workspace --no-run`) with the same metrics;
-* a **cold-JIT probe**: one git test with a fresh `TMPDIR`, which measures the
-  ~9 s one-time wasmtime JIT compile of the bundled 3.3 MB gix component;
+* **cold-JIT probes**: one test from each bundled-plugin suite (`git_plugin`,
+  `pacman_plugin`, `chezmoi_plugin`, `syncthing_plugin`) with a fresh `TMPDIR`,
+  measuring the one-time wasmtime JIT compile of each component (the git/gix
+  component alone is ~9 s);
 * the **size of the target directory** and every committed `.wasm` artifact.
 
 Peak RSS is a maximum, not a sum, for the same reason `getrusage` reports a

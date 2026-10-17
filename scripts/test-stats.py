@@ -279,33 +279,58 @@ def wasm_artifacts() -> list[dict[str, Any]]:
     return sorted(artifacts, key=lambda item: item["path"])
 
 
-def cold_jit(git_binary: Path | None, names: list[str]) -> dict[str, Any] | None:
-    """Measures a single git test with an empty component cache."""
+# Suites that JIT-compile a bundled detector component. Each one is probed once
+# with a fresh component cache so the cold cost of every bundled plugin is
+# tracked. Missing suites (plugin not landed yet) are skipped.
+COLD_PROBE_SUITES = ("git_plugin", "pacman_plugin", "chezmoi_plugin", "syncthing_plugin")
 
-    if git_binary is None or not names:
-        return None
-    with tempfile.TemporaryDirectory(prefix="backupcrawl-cold-") as tmp:
-        env = os.environ.copy()
-        env["TMPDIR"] = tmp
-        out = Path(tmp) / "stdout.txt"
-        err = Path(tmp) / "stderr.txt"
-        usage = measured(
-            [str(git_binary), "--exact", names[0], "--test-threads=1"],
-            env=env,
-            stdout_path=out,
-            stderr_path=err,
-        )
-        passed, failed, _ = parse_results(out.read_text(errors="replace"))
-        record = usage.metrics()
-        record.update(
-            {
+
+def cold_probes(binaries: dict[str, Path], output_dir: Path) -> dict[str, Any] | None:
+    """Measures the cold component compile for each bundled plugin suite.
+
+    Each probe runs a single test from the suite with a fresh ``TMPDIR``, which
+    is where the test harness puts its component cache; the reported per-probe
+    numbers therefore include exactly one wasmtime JIT compile.
+    """
+
+    probes: list[dict[str, Any]] = []
+    for index, suite in enumerate(COLD_PROBE_SUITES):
+        binary = binaries.get(suite)
+        if binary is None:
+            continue
+        names = test_names(binary)
+        if not names:
+            continue
+        with tempfile.TemporaryDirectory(prefix=f"backupcrawl-cold-{suite}-") as tmp:
+            env = os.environ.copy()
+            env["TMPDIR"] = tmp
+            out = Path(tmp) / "stdout.txt"
+            err = Path(tmp) / "stderr.txt"
+            usage = measured(
+                [str(binary), "--exact", names[0], "--test-threads=1"],
+                env=env,
+                stdout_path=out,
+                stderr_path=err,
+            )
+            passed, failed, _ = parse_results(out.read_text(errors="replace"))
+            record = {
+                "suite": suite,
                 "test": names[0],
                 "passed": passed,
                 "failed": failed,
-                "note": "single git test with a fresh TMPDIR/component cache",
+                **usage.metrics(),
             }
-        )
-        return record
+            probes.append(record)
+    if not probes:
+        return None
+    return {
+        "wall_s": round(sum(probe["wall_s"] for probe in probes), 4),
+        "cpu_s": round(sum(probe["cpu_s"] for probe in probes), 4),
+        "max_rss_mib": round(max(probe["max_rss_mib"] for probe in probes), 2),
+        "read_mib": round(sum(probe["read_mib"] for probe in probes), 2),
+        "write_mib": round(sum(probe["write_mib"] for probe in probes), 2),
+        "probes": probes,
+    }
 
 
 def render_markdown(report: dict[str, Any]) -> str:
@@ -344,9 +369,14 @@ def render_markdown(report: dict[str, Any]) -> str:
     cold = report.get("cold_jit")
     if cold:
         lines.append(
-            f"- Cold JIT probe (`{cold['test']}`): {cold['wall_s']:.3f} s wall, "
+            f"- Cold JIT probes: {cold['wall_s']:.3f} s wall, "
             f"{cold['cpu_s']:.3f} s CPU, {cold['max_rss_mib']:.1f} MiB peak RSS."
         )
+        for probe in cold.get("probes", []):
+            lines.append(
+                f"  - `{probe['suite']}` (`{probe['test']}`): "
+                f"{probe['wall_s']:.3f} s wall, {probe['cpu_s']:.3f} s CPU."
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -516,9 +546,15 @@ def print_table(report: dict[str, Any]) -> None:
     cold = report.get("cold_jit")
     if cold:
         print(
-            f"cold JIT ({cold['test']}): {cold['wall_s']:.3f}s wall, "
+            f"cold JIT: {cold['wall_s']:.3f}s wall, "
             f"{cold['cpu_s']:.3f}s CPU, {cold['max_rss_mib']:.1f} MiB peak RSS"
         )
+        for probe in cold.get("probes", []):
+            print(
+                f"  {probe['suite']:24} {probe['wall_s']:9.3f}s wall  "
+                f"{probe['cpu_s']:9.3f}s CPU  "
+                f"{probe['max_rss_mib']:6.1f} MiB"
+            )
     target_bytes = report["artifacts"].get("target_bytes")
     if target_bytes:
         print(f"target dir: {target_bytes / 1024**3:.2f} GiB")
@@ -592,21 +628,25 @@ def main() -> int:
         tests.append((executable_name(str(path)), path))
 
     tests.sort(key=lambda item: item[0])
+    binaries = dict(tests)
 
-    # Warm the shared component cache the same way the suite does, so steady
-    # state metrics are not dominated by a one-off JIT compile.
-    git_name, git_binary = next(
-        ((name, path) for name, path in tests if name == "git_plugin"), ("", None)
-    )
-    git_tests = test_names(git_binary) if git_binary else []
-    warmup = None
-    if git_tests:
-        print("warming the shared component cache ...", flush=True)
-        warmup = measured(
-            [str(git_binary), "--exact", git_tests[0], "--test-threads=1"],
-            stdout_path=output_dir / "warmup.stdout",
-            stderr_path=output_dir / "warmup.stderr",
-        ).metrics()
+    # Warm every bundled-plugin suite the same way the suite does, so steady
+    # state metrics are not dominated by one-off JIT compiles.
+    print("warming the shared component cache ...", flush=True)
+    warmup = []
+    for suite in COLD_PROBE_SUITES:
+        binary = binaries.get(suite)
+        if binary is None:
+            continue
+        names = test_names(binary)
+        if not names:
+            continue
+        usage = measured(
+            [str(binary), "--exact", names[0], "--test-threads=1"],
+            stdout_path=output_dir / f"warmup-{suite}.stdout",
+            stderr_path=output_dir / f"warmup-{suite}.stderr",
+        )
+        warmup.append({"suite": suite, "test": names[0], **usage.metrics()})
 
     suites: list[dict[str, Any]] = []
     failed_tests = 0
@@ -668,7 +708,7 @@ def main() -> int:
         "totals": totals_for(suites, doctests),
         "build": build.metrics(),
         "warmup": warmup,
-        "cold_jit": None if args.skip_cold else cold_jit(git_binary, git_tests),
+        "cold_jit": None if args.skip_cold else cold_probes(binaries, output_dir),
         "suites": suites,
         "doctests": doctests,
         "artifacts": {"target_bytes": target_bytes, "wasm": wasm_artifacts()},
