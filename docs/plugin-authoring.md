@@ -7,9 +7,11 @@ result. This document is the hands-on guide; the design rationale lives in
 [`rust-rewrite-plan.md`](rust-rewrite-plan.md) (§3–§5).
 
 The bundled [`plugins/git`](../plugins/git) detector is the reference
-implementation, and [`plugins/pacman`](../plugins/pacman) is the second bundled
-detector (native database parsing, no `exec`). The SDK ships a complete worked
-example at `crates/backupcrawl-plugin-sdk/example-plugin`.
+implementation, [`plugins/pacman`](../plugins/pacman) is the native
+database-parsing detector (no `exec`), and [`plugins/chezmoi`](../plugins/chezmoi)
+is the one bundled detector that uses `exec` (`chezmoi managed` / `chezmoi
+status`). The SDK ships a complete worked example at
+`crates/backupcrawl-plugin-sdk/example-plugin`.
 
 ## The model: three questions per path
 
@@ -142,6 +144,10 @@ through the `Host` trait, and the host grants only what the manifest declares:
 | `http(request)` | HTTP to an allowlisted origin (localhost-only by default) | `http = ["host"]` |
 | `log(level, message)` | Structured logging | always |
 
+The host runs `exec` children with an **empty environment**; a plugin that needs
+an environment variable must pass it explicitly in the request (the bundled
+chezmoi detector forwards `HOME` so the child finds its config).
+
 File **content** is read through standard `std::fs` / WASI. Since M2.0 the host
 grants read-only preopens for the **crawl root** plus every resolved
 `[capabilities].fs-read` root, each mounted at its own absolute path, so
@@ -269,6 +275,7 @@ scripts are the working reference:
 - `scripts/build-git-plugin.sh` — bundled git detector, `--target wasm32-wasip2`,
   reproducible with `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1`.
 - `scripts/build-pacman-plugin.sh` — bundled pacman detector, same pattern.
+- `scripts/build-chezmoi-plugin.sh` — bundled chezmoi detector, same pattern.
 
 > Reproducibility: the committed fixture artifacts are part of the repo and CI
 > fails if they are stale. Build the bundled detectors through their scripts:

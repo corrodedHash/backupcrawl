@@ -261,9 +261,10 @@ fn plugins_list_shows_sorted_table_and_load_errors() {
         vec![
             vec!["NAME", "VERSION", "SOURCE", "API", "ENABLED", "TRUST"],
             vec!["alpha", "2.0.0", "explicit", "ok", "yes", "new"],
+            // The bundled git, pacman and chezmoi detectors are part of
+            // discovery from M1.8/M2.1/M3.1 on.
+            vec!["chezmoi", "0.1.0", "bundled", "ok", "yes", "bundled"],
             vec!["demo", "0.1.0", "explicit", "ok", "yes", "new"],
-            // The bundled git and pacman detectors are part of discovery from
-            // M1.8/M2.1 on.
             vec!["git", "0.1.0", "bundled", "ok", "yes", "bundled"],
             vec!["pacman", "0.1.0", "bundled", "ok", "yes", "bundled"],
         ]
@@ -302,8 +303,9 @@ fn plugins_list_reflects_enabled_and_trust_config() {
         vec![
             vec!["NAME", "VERSION", "SOURCE", "API", "ENABLED", "TRUST"],
             vec!["alpha", "2.0.0", "explicit", "ok", "no", "new"],
-            vec!["demo", "0.1.0", "explicit", "ok", "yes", "changed"],
             // Only `demo` is enabled, so the bundled detectors are disabled.
+            vec!["chezmoi", "0.1.0", "bundled", "ok", "no", "bundled"],
+            vec!["demo", "0.1.0", "explicit", "ok", "yes", "changed"],
             vec!["git", "0.1.0", "bundled", "ok", "no", "bundled"],
             vec!["pacman", "0.1.0", "bundled", "ok", "no", "bundled"],
         ]
