@@ -137,8 +137,10 @@ impl ChezmoiConfig {
         let mut out = Self::default();
         for attr in config.iter() {
             match attr.key.as_str() {
-                "source-dir" => out.source_dir = Some(PathBuf::from(&attr.value)),
-                "dest-dir" => out.dest_dir = Some(PathBuf::from(&attr.value)),
+                // An empty override means "auto-detect", matching the plan's
+                // `source-dir = ""` example.
+                "source-dir" => out.source_dir = non_empty_path(&attr.value),
+                "dest-dir" => out.dest_dir = non_empty_path(&attr.value),
                 "include-types" => out.include_types = IncludeTypes::parse(&attr.value)?,
                 "chezmoi-path" => {
                     if attr.value.is_empty() {
@@ -156,6 +158,10 @@ impl ChezmoiConfig {
         }
         Ok(out)
     }
+}
+
+fn non_empty_path(value: &str) -> Option<PathBuf> {
+    (!value.is_empty()).then(|| PathBuf::from(value))
 }
 
 fn parse_timeout(value: &str) -> Result<u32, DetectorError> {
@@ -233,6 +239,14 @@ mod tests {
         let err = ChezmoiConfig::from_config(&config(&[("include-types", "scripts")])).unwrap_err();
         assert!(err.message().contains("scripts"), "{err}");
         assert!(err.message().contains("include-types"), "{err}");
+    }
+
+    #[test]
+    fn empty_dir_overrides_mean_auto_detect() {
+        let parsed =
+            ChezmoiConfig::from_config(&config(&[("source-dir", ""), ("dest-dir", "")])).unwrap();
+        assert_eq!(parsed.source_dir, None);
+        assert_eq!(parsed.dest_dir, None);
     }
 
     #[test]
