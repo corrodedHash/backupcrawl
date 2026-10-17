@@ -732,12 +732,19 @@ third-party plugins exist. See open question 4.
 
 ## 9. Performance and parallelism
 
-- Walker: `jwalk`/`rayon` for parallel directory traversal; collect per-worker results, then merge
-  and sort deterministically.
+- Walker: one detector set **per worker** (`Vec<Vec<DetectorSlot>>`); directories
+  are processed from a shared FIFO work queue by `std::thread` workers, so no new
+  dependencies. Every directory is popped by exactly one worker, which keeps
+  first-claim-wins per path unchanged. Per-directory results are collected in a
+  map; after the workers join, the tree is rebuilt and loose-path collapsing is
+  computed bottom-up exactly like the old recursion, and claims, denied paths and
+  symlinks are merged and sorted deterministically. Scheduling never influences
+  output: `--jobs 1` and `--jobs N` are byte-identical (M4a).
 - Detector instances: one per worker thread (wasmtime `Store` is not `Sync`), each with its own
   mutable state. Expensive global preparations must go through the host cache so the second
-  worker's `init` reads cache instead of re-running `pacman -Qkk`/`chezmoi managed`. A host
-  single-flight guard for cache keys prevents a thundering herd of N identical preparation calls.
+  worker's `init` reads cache instead of re-running `pacman -Qkk`/`chezmoi managed`. The
+  workers' `init` calls are serialized by a single mutex; the first warms the cache and the
+  rest hit it (`--jobs` default 1, `0` = available parallelism). No cache-lock ABI is needed.
 - Bulk `check-files` per directory reduces boundary crossings; wasmtime component calls are
   microseconds, so this is an optimization, not a necessity.
 - Cache: per-plugin persistent KV under `$XDG_CACHE_HOME/backupcrawl/plugins/<name>/`, with
@@ -754,7 +761,9 @@ third-party plugins exist. See open question 4.
 - `--stats`: per-plugin wall time, exec count, cache hits, errors — makes it visible which
   detector is slow (pacman `-Qkk` will usually be the culprit).
 - Progress display: port `PathTracker` semantics to `indicatif` + `console` (open/close counters,
-  stragglers).
+  stragglers). Implemented in M4a as `--progress`: the CLI renders on **stderr**, throttled and
+  disabled when stderr is not a TTY; core publishes a plain `ProgressSnapshot` through a
+  `ProgressSink` trait (no terminal types in core), so JSON/console stdout is never touched.
 
 **Per-worker contract (frozen in M2.0, implemented by M4a).** One detector instance per
 worker. `init`/`finish` bracket that instance's lifetime, so a scan with N workers calls each
@@ -1189,6 +1198,23 @@ Acceptance for every task: `cargo fmt --check`,
   output on stdout and must be off by default. *Done when:* a non-TTY (assert_cmd) run emits no
   progress bytes on either stream, a forced/TTY-style render is unit-tested, and `--progress`
   works with `--format json` without corrupting stdout.
+
+  *Implemented (M4a, branch `feat/m4a-parallel-progress`):* `walker::crawl` takes
+  `Vec<Vec<DetectorSlot>>` (one set per worker) and drives a shared FIFO work queue with
+  `std::thread::scope`; `walker::scan` remains the single-worker convenience. A worker asks its
+  own instances, collects a per-directory result, and the merge step rebuilds the tree for
+  bottom-up loose collapsing exactly like the old recursion, then sorts claims/denied/symlinks and
+  merges reports (summed errors, stable note union, disabled wins). `init` calls are serialized by
+  one mutex (the single-flight cache guard), and `finish` runs once per worker instance. Core
+  exposes `ProgressSnapshot`/`ProgressSink`/`NoProgress`; the CLI implements the sink with
+  `indicatif` on stderr, throttled at 100 ms and disabled when stderr is not a TTY. `--jobs N`
+  defaults to 1 (`0` = `available_parallelism`); worker sets are built up front from
+  discovery/trust/`Runtime`, and a plugin that fails to instantiate is skipped once. Tests:
+  `crates/backupcrawl-core/tests/parallel_walker.rs` (1/2/4-worker serialized-result equality
+  over prune, non-prune claims, collapsing, denied paths and symlinks; per-worker init/finish
+  counts; non-overlapping init; disabled-in-one-worker report merge) and the CLI suite
+  (`--jobs 4` JSON equals `--jobs 1`, `--jobs 0`, non-TTY `--progress` is silent, JSON stays
+  parseable). Denied paths are now sorted globally (the M4a ordering normalization).
 
 ### M3 task breakdown
 

@@ -8,9 +8,12 @@
 pub mod detector;
 pub mod ignore;
 pub mod model;
+pub mod progress;
 pub mod walker;
 
 pub use detector::{
     Attr, Claim, Detector, DetectorError, DetectorReport, DetectorSlot, Hooks, LinkInfo, ScanInfo,
 };
 pub use model::{CrawlResult, Entry, PluginReport, Status, SymlinkEntry};
+pub use progress::{NoProgress, ProgressSink, ProgressSnapshot};
+pub use walker::{CrawlOutcome, crawl, scan};

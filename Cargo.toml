@@ -30,7 +30,7 @@ description = "Detect files which are not backed up"
 anyhow = "1"
 backupcrawl-core = { path = "crates/backupcrawl-core" }
 clap = { version = "4", features = ["derive"] }
-console = "0.15"
+console = "0.16"
 dirs = "6"
 env_logger = "0.11"
 # The pacman detector reads gzipped BSD mtree databases; the pure-Rust backend
@@ -46,6 +46,7 @@ gix = { version = "0.89", default-features = false, features = ["basic", "status
 glob = "0.3"
 globset = "0.4"
 hex = "0.4"
+indicatif = "0.18"
 libc = "0.2"
 log = "0.4"
 # MD5 is still the digest most pacman mtree entries carry; `sha2` is the
