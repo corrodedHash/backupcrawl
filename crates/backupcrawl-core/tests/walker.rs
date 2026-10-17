@@ -71,17 +71,37 @@ fn patterns_match_the_full_path_like_fnmatch() {
 
 #[cfg(unix)]
 #[test]
-fn symlinks_are_skipped_for_now() {
+fn symlinks_are_reported_and_not_followed() {
     use std::os::unix::fs::symlink;
 
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     touch(&root.join("real.txt"));
     symlink(root.join("real.txt"), root.join("link.txt")).unwrap();
+    // A link into a directory must not make the walker descend twice.
+    std::fs::create_dir_all(root.join("dir")).unwrap();
+    touch(&root.join("dir/inner.txt"));
+    symlink(root.join("dir"), root.join("dirlink")).unwrap();
 
     let result = walker::scan(root, &matcher(&[]), &mut []);
 
-    assert_eq!(result.loose_paths, vec![root.join("real.txt")]);
+    assert_eq!(
+        result.loose_paths,
+        vec![root.join("real.txt"), root.join("dir")]
+    );
+    let links: Vec<_> = result
+        .symlinks
+        .iter()
+        .map(|link| (link.path.clone(), link.target.clone(), link.dangling))
+        .collect();
+    assert_eq!(
+        links,
+        vec![
+            (root.join("dirlink"), root.join("dir"), false),
+            (root.join("link.txt"), root.join("real.txt"), false),
+        ],
+        "symlinks are reported, sorted, and never followed"
+    );
 }
 
 #[cfg(unix)]

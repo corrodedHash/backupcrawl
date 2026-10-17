@@ -60,6 +60,30 @@ pub struct CrawlResult {
     pub loose_paths: Vec<PathBuf>,
     /// Paths that could not be read.
     pub denied_paths: Vec<PathBuf>,
+    /// Symlinks no detector claimed, sorted by path (section 7.5).
+    #[serde(default)]
+    pub symlinks: Vec<SymlinkEntry>,
     /// One report per detector that ran.
     pub plugins: Vec<PluginReport>,
+}
+
+/// An unmanaged symlink seen by the walker (section 7.5).
+///
+/// The walker never follows symlinks (that stays deferred). A link a plugin
+/// claimed — for example a package-owned link — is recorded in that plugin's
+/// report instead; everything else lands here and is always reported.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SymlinkEntry {
+    /// Path of the symlink itself.
+    pub path: PathBuf,
+    /// Target the link points at, made absolute and lexically normalized
+    /// (`..`/`.` resolved without touching the filesystem).
+    pub target: PathBuf,
+    /// Whether the target does not exist (including broken chains).
+    pub dangling: bool,
+    /// Set when the link is considered clean because the target is inside a
+    /// clean-managed tree (a `clean` pruning directory claim, or an exactly
+    /// claimed `clean` path); carries that target path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<PathBuf>,
 }

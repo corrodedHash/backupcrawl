@@ -1,9 +1,9 @@
 //! Depth-first crawler with detector integration.
 //!
 //! The traversal mirrors the Python implementation: per directory, ignored
-//! entries and symlinks are skipped, unreadable files/directories are collected
-//! as denied, sockets/FIFOs/devices are ignored, and directories and regular
-//! files are offered to the detectors.
+//! entries are skipped, unreadable files/directories are collected as denied,
+//! sockets/FIFOs/devices are ignored, and directories, regular files and
+//! symlinks are offered to the detectors.
 //!
 //! # Merge rules (section 6 of the rewrite plan)
 //!
@@ -21,19 +21,27 @@
 //!   its files (this is what keeps `/usr`-style output readable). A subtree with
 //!   at least one claim keeps its loose paths individually.
 //!
+//! # Symlinks (section 7.5)
+//!
+//! Symlinks are never followed. Each link is turned into a
+//! [`LinkInfo`] and offered to detectors that declared the `symlink` hook; a
+//! claim is recorded in that detector's panel like any other. Unclaimed links
+//! are collected in [`CrawlResult::symlinks`] and are never dropped. After the
+//! scan the **target-in-managed-tree rule** runs: a link whose target is inside
+//! a `clean` *pruning* directory claim, or is itself an exactly claimed `clean`
+//! path, is marked clean with `via = Some(target)`. Non-pruning directory claims
+//! are deliberately not extended to their subtree.
+//!
 //! `init` runs once before the scan and `finish` once after; per-detector
 //! results become [`PluginReport`]s with entries sorted by path.
-//!
-//! Symlinks are still skipped entirely (the trait carries `check_symlink`, but
-//! reporting/traversal is M2; section 7.5).
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use log::{debug, warn};
 
-use crate::detector::{Claim, DetectorError, DetectorReport, DetectorSlot, ScanInfo};
+use crate::detector::{Claim, DetectorError, DetectorReport, DetectorSlot, LinkInfo, ScanInfo};
 use crate::ignore::IgnoreMatcher;
-use crate::model::{CrawlResult, Entry, PluginReport};
+use crate::model::{CrawlResult, Entry, PluginReport, Status, SymlinkEntry};
 
 /// Scans `root` depth-first, asking `detectors` in order, and returns the
 /// aggregated result.
@@ -43,10 +51,20 @@ pub fn scan(root: &Path, ignore: &IgnoreMatcher, detectors: &mut [DetectorSlot])
     let dir = run.crawl(root, ignore);
     run.finish_all();
 
+    let DirResult {
+        loose_paths,
+        denied_paths,
+        mut symlinks,
+        ..
+    } = dir;
+    run.mark_via(&mut symlinks);
+    symlinks.sort_by(|left, right| left.path.cmp(&right.path));
+
     CrawlResult {
         root: root.to_path_buf(),
-        loose_paths: dir.loose_paths,
-        denied_paths: dir.denied_paths,
+        loose_paths,
+        denied_paths,
+        symlinks,
         plugins: run.reports(),
     }
 }
@@ -58,6 +76,8 @@ struct DirResult {
     loose_paths: Vec<PathBuf>,
     /// Unreadable paths of this subtree.
     denied_paths: Vec<PathBuf>,
+    /// Unmanaged symlinks of this subtree (never dropped).
+    symlinks: Vec<SymlinkEntry>,
     /// Whether any detector claimed a path in this subtree (including the
     /// directory itself).
     claimed: bool,
@@ -72,6 +92,9 @@ struct Run<'a> {
     active: Vec<bool>,
     /// Claimed entries per detector, in traversal order.
     entries: Vec<Vec<Entry>>,
+    /// Paths claimed `clean` by a *pruning* directory claim; the
+    /// target-in-managed-tree rule extends only over these.
+    clean_prune_dirs: Vec<PathBuf>,
 }
 
 impl<'a> Run<'a> {
@@ -82,6 +105,7 @@ impl<'a> Run<'a> {
             detectors,
             active: vec![true; count],
             entries: vec![Vec::new(); count],
+            clean_prune_dirs: Vec::new(),
         }
     }
 
@@ -145,6 +169,9 @@ impl<'a> Run<'a> {
 
         // The directory itself is offered to the directory hooks first.
         if let Some((index, claim)) = self.ask_dir(dir) {
+            if claim.status == Status::Clean && claim.prune {
+                self.clean_prune_dirs.push(dir.to_path_buf());
+            }
             self.record(index, dir, &claim);
             out.claimed = true;
             if claim.prune {
@@ -167,6 +194,7 @@ impl<'a> Run<'a> {
 
         let mut files = Vec::new();
         let mut dirs = Vec::new();
+        let mut symlinks = Vec::new();
         for entry in reader {
             let entry = match entry {
                 Ok(entry) => entry,
@@ -187,8 +215,7 @@ impl<'a> Run<'a> {
                 }
             };
             if file_type.is_symlink() {
-                // Symlinks are reported from M2 on; for now they are skipped.
-                continue;
+                symlinks.push(path);
             } else if file_type.is_file() {
                 if is_readable(&path, false) {
                     files.push(path);
@@ -207,6 +234,7 @@ impl<'a> Run<'a> {
 
         files.sort();
         dirs.sort();
+        symlinks.sort();
 
         // File detectors, first claim wins; unclaimed files stay loose.
         for file in files {
@@ -219,9 +247,38 @@ impl<'a> Run<'a> {
             }
         }
 
+        // Symlinks: offered to the symlink hooks, never followed. Claimed links
+        // stay in the plugin panel; the rest are reported in the symlink panel.
+        for path in symlinks {
+            let link = match link_info(&path) {
+                Ok(link) => link,
+                Err(err) => {
+                    if err.kind() == std::io::ErrorKind::PermissionDenied {
+                        out.denied_paths.push(path);
+                    } else {
+                        warn!("cannot inspect symlink {}: {err}", path.display());
+                    }
+                    continue;
+                }
+            };
+            match self.ask_symlink(&link) {
+                Some((index, claim)) => {
+                    self.record(index, &path, &claim);
+                    out.claimed = true;
+                }
+                None => out.symlinks.push(SymlinkEntry {
+                    path: link.path,
+                    target: link.target,
+                    dangling: link.dangling,
+                    via: None,
+                }),
+            }
+        }
+
         for sub in dirs {
             let child = self.crawl(&sub, ignore);
             out.denied_paths.extend(child.denied_paths);
+            out.symlinks.extend(child.symlinks);
             out.claimed |= child.claimed;
             if child.claimed {
                 out.loose_paths.extend(child.loose_paths);
@@ -264,6 +321,21 @@ impl<'a> Run<'a> {
         None
     }
 
+    /// Asks the symlink hooks in order; first claim wins.
+    fn ask_symlink(&mut self, link: &LinkInfo) -> Option<(usize, Claim)> {
+        for index in 0..self.detectors.len() {
+            if !self.is_asked(index, Hook::Symlink) {
+                continue;
+            }
+            match self.detectors[index].detector.check_symlink(link) {
+                Ok(Some(claim)) => return Some((index, claim)),
+                Ok(None) => {}
+                Err(err) => self.handle_error(index, err),
+            }
+        }
+        None
+    }
+
     /// Whether detector `index` is active and declared `hook`.
     fn is_asked(&self, index: usize, hook: Hook) -> bool {
         if !self.active[index] {
@@ -273,6 +345,30 @@ impl<'a> Run<'a> {
         match hook {
             Hook::Dir => hooks.dir,
             Hook::File => hooks.file,
+            Hook::Symlink => hooks.symlink,
+        }
+    }
+
+    /// Applies the target-in-managed-tree rule (section 7.5).
+    ///
+    /// A link is marked clean when its target is exactly a claimed `clean` path
+    /// or lies inside a `clean` **pruning** directory claim. Non-pruning claims
+    /// are deliberately not extended to their subtree.
+    fn mark_via(&self, links: &mut [SymlinkEntry]) {
+        for link in links {
+            let target = &link.target;
+            let exactly_claimed = self
+                .entries
+                .iter()
+                .flatten()
+                .any(|entry| entry.status == Status::Clean && entry.path == *target);
+            let inside_pruned = self
+                .clean_prune_dirs
+                .iter()
+                .any(|dir| target.starts_with(dir));
+            if exactly_claimed || inside_pruned {
+                link.via = Some(target.clone());
+            }
         }
     }
 
@@ -300,6 +396,48 @@ impl<'a> Run<'a> {
 enum Hook {
     Dir,
     File,
+    Symlink,
+}
+
+/// Builds the [`LinkInfo`] for `path`, resolving the target to an absolute,
+/// lexically normalized path without following symlink chains.
+///
+/// Lexical normalization (rather than `canonicalize`) keeps the target
+/// comparable with the walker's own paths; it also works for dangling targets,
+/// where canonicalization fails.
+fn link_info(path: &Path) -> std::io::Result<LinkInfo> {
+    let raw = std::fs::read_link(path)?;
+    let joined = if raw.is_absolute() {
+        raw
+    } else {
+        path.parent().unwrap_or_else(|| Path::new("/")).join(&raw)
+    };
+    let target = lexical_normalize(&joined);
+    let dangling = !target.exists();
+    Ok(LinkInfo {
+        path: path.to_path_buf(),
+        target,
+        dangling,
+    })
+}
+
+/// Lexically normalizes a path (`.`/`..` components, no filesystem access).
+fn lexical_normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => out.push(prefix.as_os_str()),
+            Component::RootDir => out.push(Path::new("/")),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !out.pop() {
+                    out.push(Path::new("/"));
+                }
+            }
+            Component::Normal(part) => out.push(part),
+        }
+    }
+    out
 }
 
 /// Best-effort current user for [`ScanInfo::user`].
