@@ -27,7 +27,7 @@ Integration branch: `feat/rust-rewrite` in `/var/lib/opencode-agent/coding/backu
 | --- | --- | --- |
 | M2.0 contract hardening | `feat/m2.0-contract-hardening` | done, merged as `fbc5dd2` |
 | M2 pacman + symlinks | `feat/m2-pacman-symlinks` | done, merged as `72d8f3c` |
-| M4a parallel + progress | `feat/m4a-parallel-progress` | implemented on branch, awaiting review |
+| M4a parallel + progress | `feat/m4a-parallel-progress` | done, merged as `fb9e06e` |
 | M3.1 chezmoi | `feat/m3.1-chezmoi` | not started |
 | M3.2 syncthing | `feat/m3.2-syncthing` | not started |
 
@@ -82,8 +82,13 @@ Integration branch: `feat/rust-rewrite` in `/var/lib/opencode-agent/coding/backu
 
 ## Environment notes
 
-- Build with `CARGO_TARGET_DIR=/var/lib/opencode-agent/targets/<task>` to keep generated
-  artifacts off the repository filesystem.
+- Builds share one machine-level cache: `~/.cargo/config.toml` sets
+  `[build] target-dir = "/var/lib/opencode-agent/targets/shared"`, so every worktree reuses the
+  same compiled dependency graph and generated artifacts stay off the repository filesystem (a
+  6 GB tmpfs). Do **not** set a per-task `CARGO_TARGET_DIR` — an explicit env var overrides the
+  shared dir and reintroduces a full ~8 GB dependency rebuild per task.
+- The dev profile is trimmed to `debug = 1` (repo `.cargo/config.toml`) to keep debug `target/`
+  sizes manageable; release/WASM artifacts are unaffected.
 - `cargo component` 0.21.1 is installed; plugin builds default to `wasm32-wasip1` and the git
   plugin uses `wasm32-wasip2`.
 - The git plugin build must stay byte-reproducible
@@ -138,6 +143,23 @@ Integration branch: `feat/rust-rewrite` in `/var/lib/opencode-agent/coding/backu
   vs 12 ms at `--jobs 8` (debug binary, warm cache), with byte-identical JSON at 1/4/8. Deviations:
   denied paths are now sorted globally and merged plugin notes are sorted (the M4a determinism
   normalization); `scripts/build-git-plugin.sh`/`scripts/build-pacman-plugin.sh` rebuild
-  reproducibly, but the git artifact's rebuild in this worktree differs from the committed blob
+  reproducibly, but the git artifact's rebuild in this worktree differed from the committed blob
   only in embedded `CARGO_HOME`/`RUSTUP_HOME` source paths, so the committed artifact was left
-  untouched.
+  untouched at merge time.
+- 2026-10-17: **M4a merged** (`fb9e06e`); acceptance re-run on the merged tree with
+  `scripts/test-stats.py --check` green (259 tests, ~5.4 s warm wall, ~20 s CPU, 178 MiB peak
+  RSS). The embedded-path reproducibility problem found during M4a was fixed separately
+  (`ae716b6`): all wasm build scripts now source `scripts/wasm-build-env.sh`, which sets a single
+  release codegen unit and remaps `CARGO_HOME`/`RUSTUP_HOME`/checkout/target prefixes, and the
+  committed `git`/`pacman`/`test-detector`/`dotbak` components were rebuilt from it. A cross-
+  `CARGO_HOME` rebuild of the test fixture is byte-identical, and no machine paths remain in the
+  artifacts. Baseline refreshed after the rebuild.
+- 2026-10-17: **Build cache consolidated.** Every worktree previously built its own
+  `CARGO_TARGET_DIR=/var/lib/opencode-agent/targets/<task>`, recompiling the wasmtime/cranelift/gix
+  graph (~8 GB) per task; leftover dirs reached ~49 GB. Now a machine-level
+  `~/.cargo/config.toml` pins `[build] target-dir = "/var/lib/opencode-agent/targets/shared"` so
+  all worktrees reuse one dependency cache (cargo serialises concurrent builds with a build lock),
+  and the repo `.cargo/config.toml` sets `[profile.dev] debug = 1` to shrink each build. The wasm
+  build scripts (`scripts/wasm-build-env.sh`, `scripts/build-cli-fixture-plugin.sh`) now resolve
+  the effective target dir via `cargo metadata`, so they honor the config instead of assuming the
+  in-tree `target/`. Committed WASM artifacts remain byte-identical (release profile unchanged).
