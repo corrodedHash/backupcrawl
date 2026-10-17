@@ -310,7 +310,12 @@ fn plugins_list_reflects_enabled_and_trust_config() {
 #[test]
 fn plugins_info_prints_manifest_and_capabilities() {
     let xdg = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    // The demo manifest declares `fs-read = ["~/.config/demo"]`; create it so
+    // the resolved scope (not an "unresolved" marker) is what gets asserted.
+    fs::create_dir_all(home.path().join(".config/demo")).unwrap();
     let output = plugins_command(xdg.path())
+        .env("HOME", home.path())
         .args(["plugins", "info", "--plugin-dir"])
         .arg(plugins_fixture_dir())
         .arg("demo")
@@ -345,8 +350,8 @@ fn plugins_info_prints_manifest_and_capabilities() {
     assert_eq!(get("hooks"), Some("dir, file"));
     assert_eq!(get("priority"), Some("5"));
     assert_eq!(get("exec"), Some("demo-tool"));
-    assert_eq!(get("fs"), Some("read / (v1 read-only preopen)"));
-    assert_eq!(get("fs-read"), Some("~/.config/demo (documented intent)"));
+    let expected_fs = format!("read {}", home.path().join(".config/demo").display());
+    assert_eq!(get("fs"), Some(expected_fs.as_str()));
     assert_eq!(get("http"), Some("http://127.0.0.1:9000"));
     assert_eq!(get("cache"), Some("yes"));
 
@@ -354,6 +359,36 @@ fn plugins_info_prints_manifest_and_capabilities() {
     let source = get("source").expect("source field");
     assert!(source.starts_with("explicit ("), "got: {source}");
     assert!(source.ends_with("/demo)"), "got: {source}");
+}
+
+#[test]
+fn plugins_info_marks_unresolved_fs_read_specs() {
+    let xdg = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    // No `~/.config/demo`: the scope resolves to nothing and is shown as
+    // unresolved rather than silently claimed as readable.
+    let output = plugins_command(xdg.path())
+        .env("HOME", home.path())
+        .args(["plugins", "info", "--plugin-dir"])
+        .arg(plugins_fixture_dir())
+        .arg("demo")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let fields = info_fields(&stdout);
+    let fs_line = fields
+        .iter()
+        .find(|(name, _)| name == "fs")
+        .map(|(_, value)| value.as_str())
+        .expect("fs field");
+
+    assert!(
+        fs_line.contains("unresolved: ~/.config/demo"),
+        "got: {fs_line}"
+    );
+    assert!(!fs_line.contains("documented intent"), "got: {fs_line}");
 }
 
 #[test]

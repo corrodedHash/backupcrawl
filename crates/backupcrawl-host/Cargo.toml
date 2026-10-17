@@ -12,6 +12,7 @@ description.workspace = true
 anyhow.workspace = true
 backupcrawl-core.workspace = true
 dirs.workspace = true
+glob.workspace = true
 hex.workspace = true
 log.workspace = true
 serde.workspace = true

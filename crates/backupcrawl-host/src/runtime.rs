@@ -4,8 +4,8 @@
 //! configured once), the component [`Linker`], the resource [`Limits`], the
 //! cancellation flag and the epoch watchdog. [`Runtime::instantiate`] compiles a
 //! detector component and builds a [`WasmDetector`]: **one [`Store`] per
-//! detector** (a store is not `Sync`, section 9), with a read-only `/` preopen
-//! and an empty environment.
+//! detector** (a store is not `Sync`, section 9), with read-only preopens for
+//! the granted filesystem roots ([`crate::fs`]) and an empty environment.
 //!
 //! [`WasmDetector`] implements the core
 //! [`Detector`](backupcrawl_core::detector::Detector) trait. Its inherent API
@@ -37,6 +37,7 @@ use backupcrawl_core::detector::{
 };
 
 use crate::bindings::{Plugin, detector_exports, wit_types};
+use crate::fs::{FsGrants, FsReadScope};
 use crate::imports::{CapabilityPolicy, HostState};
 use crate::limits::Limits;
 
@@ -164,15 +165,38 @@ impl Runtime {
     /// The compiled component is cached on the runtime (keyed by the wasm
     /// bytes), so repeated instantiations of the same plugin — and the many
     /// instances a scan or test builds — reuse one compilation.
+    ///
+    /// Filesystem content is granted from the policy's declared `fs-read` specs
+    /// (resolved against the live filesystem). This entry point has no crawl
+    /// context, so it does **not** grant a crawl root; the CLI scan uses
+    /// [`Runtime::instantiate_plugin`] instead, and tests that need an explicit
+    /// root use [`Runtime::instantiate_with_fs`].
     pub fn instantiate(
         &self,
         wasm: &[u8],
         name: &str,
         policy: CapabilityPolicy,
     ) -> Result<WasmDetector> {
+        let scope = FsReadScope::resolve(policy.fs_read_specs());
+        log_unresolved(name, &scope);
+        self.instantiate_with_fs(wasm, name, policy, &FsGrants::for_scope(&scope))
+    }
+
+    /// Compiles and instantiates `wasm` with explicit filesystem grants.
+    ///
+    /// `grants` replaces the policy-derived roots entirely, so a test can mount
+    /// exactly the directories it needs (for example a temp fixture root). The
+    /// policy still carries the non-filesystem capabilities.
+    pub fn instantiate_with_fs(
+        &self,
+        wasm: &[u8],
+        name: &str,
+        policy: CapabilityPolicy,
+        grants: &FsGrants,
+    ) -> Result<WasmDetector> {
         let component = self.compiled_component(wasm, name)?;
 
-        let state = HostState::new(name, policy, &self.cache_root, &self.limits)?;
+        let state = HostState::with_grants(name, policy, &self.cache_root, &self.limits, grants)?;
         let mut store = Store::new(&self.engine, state);
         store.limiter(|state| state.limiter());
         store
@@ -224,14 +248,34 @@ impl Runtime {
         Ok(component)
     }
 
-    /// Instantiates a discovered plugin, deriving its capability policy from the
-    /// manifest.
+    /// Instantiates a discovered plugin for a scan rooted at `crawl_root`.
+    ///
+    /// The capability policy comes from the manifest; the filesystem grants are
+    /// the absolute `crawl_root` plus every resolved `fs-read` spec, so ancestor
+    /// or system-wide reads need an explicit broad spec (`git` and `pacman`
+    /// declare `/`). Unresolved specs are logged as warnings and the plugin
+    /// still loads.
     pub fn instantiate_plugin(
         &self,
         plugin: &crate::discovery::DiscoveredPlugin,
+        crawl_root: &Path,
     ) -> Result<WasmDetector> {
         let policy = CapabilityPolicy::from_manifest(&plugin.manifest);
-        self.instantiate(&plugin.wasm_bytes, &plugin.name, policy)
+        let scope = FsReadScope::resolve(policy.fs_read_specs());
+        log_unresolved(&plugin.name, &scope);
+        self.instantiate_with_fs(
+            &plugin.wasm_bytes,
+            &plugin.name,
+            policy,
+            &FsGrants::for_scan(crawl_root, &scope),
+        )
+    }
+}
+
+/// Warns about `fs-read` specs that resolved to nothing; the plugin still loads.
+fn log_unresolved(name: &str, scope: &FsReadScope) {
+    for spec in &scope.unresolved {
+        log::warn!("plugin `{name}`: fs-read spec `{spec}` resolved to no existing directory");
     }
 }
 

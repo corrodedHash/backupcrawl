@@ -37,6 +37,7 @@ use sha2::{Digest, Sha256};
 use toml_edit::{DocumentMut, Item, Table};
 
 use crate::discovery::{DiscoveredPlugin, PluginSource};
+use crate::fs::FsReadScope;
 
 /// Canonical prefix of every stored manifest hash.
 pub const HASH_PREFIX: &str = "sha256:";
@@ -125,6 +126,8 @@ pub struct TrustRequest<'a> {
     /// Why the decision is needed ([`TrustState::Unknown`] or
     /// [`TrustState::Changed`]).
     pub state: &'a TrustState,
+    /// The resolved `fs-read` scope (crawl root excluded: there is no scan yet).
+    pub fs_scope: &'a FsReadScope,
 }
 
 impl TrustRequest<'_> {
@@ -137,9 +140,9 @@ impl TrustRequest<'_> {
     ///
     /// Capabilities are printed with `exec` **first** and marked as unsandboxed,
     /// because a spawned program runs with the user's own rights (§10). The
-    /// blanket read preopen is printed plainly (`fs: read /`; v1 grants every
-    /// plugin all of `/`) followed by the informational `fs-read` intent, the
-    /// http/cache grants and the manifest hash.
+    /// filesystem scope is the **resolved** one (`fs: read /` for a plugin that
+    /// declares `/`, the concrete roots for a scoped plugin, unresolved specs
+    /// visibly marked), followed by the http/cache grants and the manifest hash.
     pub fn render(&self) -> String {
         let manifest = &self.plugin.manifest;
         let mut out = String::new();
@@ -168,13 +171,7 @@ impl TrustRequest<'_> {
             ));
         }
 
-        out.push_str("  fs:    read / (read-only preopen; v1 grants every plugin all of /)\n");
-        if !manifest.capabilities.fs_read.is_empty() {
-            out.push_str(&format!(
-                "  fs-read: {} (documented intent)\n",
-                manifest.capabilities.fs_read.join(", ")
-            ));
-        }
+        out.push_str(&format!("  fs:    read {}\n", self.fs_scope.display()));
         if manifest.capabilities.http.is_empty() {
             out.push_str("  http:  (none)\n");
         } else {
@@ -245,10 +242,12 @@ pub fn evaluate(
     let state = trust_state(plugin, trusted);
 
     let (trusted_now, persist) = if state.needs_confirmation() {
+        let scope = FsReadScope::resolve(&plugin.manifest.capabilities.fs_read);
         let request = TrustRequest {
             plugin,
             hash: &hash,
             state: &state,
+            fs_scope: &scope,
         };
         let confirmed = prompt.confirm(&request);
         (confirmed, confirmed)

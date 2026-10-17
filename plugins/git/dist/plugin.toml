@@ -21,7 +21,9 @@ priority = 10
 # through the host `exec` import, which this allowlist enables. Nothing runs
 # unless the fallback is selected in `[plugins.git]`.
 exec = ["git"]
-# Documented intent (Appendix A); the v1 host preopens `/` read-only.
-fs-read = []
+# Ancestor-repository discovery walks above the crawl root, so the git detector
+# declares the whole filesystem (M2.0). The grant is real and read-only; writes
+# fail in `cap-std`.
+fs-read = ["/"]
 http = []
 cache = false

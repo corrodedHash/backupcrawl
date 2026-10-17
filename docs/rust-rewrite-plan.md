@@ -752,9 +752,20 @@ third-party plugins exist. See open question 4.
 - Progress display: port `PathTracker` semantics to `indicatif` + `console` (open/close counters,
   stragglers).
 
-Rough sequence: single-threaded crawler with per-plugin instances first (M1–M2), then
-parallelism (M4a) once the grant/permission model is settled and pacman gives a real workload;
-keep it behind `--jobs` with a fixed default of 1 until proven.
+**Per-worker contract (frozen in M2.0, implemented by M4a).** One detector instance per
+worker. `init`/`finish` bracket that instance's lifetime, so a scan with N workers calls each
+plugin's `init`/`finish` N times. Instances share no mutable state; global preparation belongs
+in the host cache, and cache-write races between workers must be benign. The first worker's
+`init` is serialized and warms the cache; the remaining workers' `init` calls then hit it (the
+M4a single-flight guard). There are no cross-worker ordering guarantees: first-claim-wins is
+still evaluated per path, and every path is handled by exactly one worker. Output stays
+deterministic — per-worker claims are merged and sorted in the host after the walk, and
+loose-path collapsing happens bottom-up after traversal — so `--jobs 1` and `--jobs N` produce
+byte-identical output. Plugins must not assume one instance per process, process-global mutable
+state, or hook order across unrelated paths.
+
+Rollout: single-threaded crawler with per-plugin instances first (M1–M2, `--jobs 1`), then
+parallelism (M4a) once the grant/permission model is settled and pacman gives a real workload.
 
 ## 10. Security and trust model
 

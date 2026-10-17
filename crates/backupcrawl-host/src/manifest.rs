@@ -152,7 +152,10 @@ pub struct Capabilities {
     #[serde(default)]
     pub exec: Vec<String>,
 
-    /// Documented read roots (informational in v1; the preopen is `/`).
+    /// Read-only filesystem roots the plugin needs (`~` + shell globs; M2.0).
+    ///
+    /// Authoritative since M2.0: the host preopens the crawl root plus every
+    /// resolved spec. An unresolved spec is a warning, not a load error.
     #[serde(default, rename = "fs-read")]
     pub fs_read: Vec<String>,
 

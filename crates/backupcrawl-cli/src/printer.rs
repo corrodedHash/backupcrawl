@@ -14,6 +14,7 @@ use serde::Serialize;
 use backupcrawl_core::detector::DetectorReport;
 use backupcrawl_core::{CrawlResult, PluginReport, Status};
 use backupcrawl_host::discovery::{DiscoveredPlugin, DiscoveryOutcome, PluginSource};
+use backupcrawl_host::fs::FsReadScope;
 use backupcrawl_host::manifest::{Manifest, SUPPORTED_CONTRACT};
 use backupcrawl_host::trust::{PluginTrust, TrustState};
 
@@ -278,12 +279,10 @@ pub fn print_plugins_info(plugin: &DiscoveredPlugin, trust: &PluginTrust) {
         "  exec: {}",
         list_or_none(&manifest.capabilities.exec)
     ));
-    // v1 always grants a read-only `/` preopen; `fs-read` is documented intent.
-    lines.push("  fs: read / (v1 read-only preopen)".to_owned());
-    lines.push(format!(
-        "  fs-read: {} (documented intent)",
-        list_or_none(&manifest.capabilities.fs_read)
-    ));
+    // The real, resolved content scope (M2.0): the crawl root is added when a
+    // detector is actually instantiated, so `info` shows the declared scope.
+    let scope = FsReadScope::resolve(&manifest.capabilities.fs_read);
+    lines.push(format!("  fs: read {}", scope.display()));
     lines.push(format!(
         "  http: {}",
         list_or_none(&manifest.capabilities.http)
