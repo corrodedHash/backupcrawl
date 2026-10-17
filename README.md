@@ -8,10 +8,11 @@ Detect files which are not backed up.
 This repository is the Rust rewrite. Each mechanism is a WebAssembly plugin
 component (wasmtime + the component model) that the binary loads at runtime; the
 core only walks the filesystem, queries the plugins and aggregates the result.
-**git** and **pacman** are the detectors wired up so far — they report
-repository/package state (clean, dirty, unsynced) instead of dumping every
-tracked/owned file into "not backed up". The remaining mechanisms and the
-roadmap live in
+**git**, **pacman** and **syncthing** are the detectors wired up so far — they
+report repository/package/folder state (clean, dirty, unsynced) instead of
+dumping every tracked/owned file into "not backed up". Syncthing is
+replication, not archival backup: a clean folder means "synced to the cluster",
+not "archived". The remaining mechanisms and the roadmap live in
 [`docs/rust-rewrite-plan.md`](docs/rust-rewrite-plan.md); plugin authors should
 read [`docs/plugin-authoring.md`](docs/plugin-authoring.md).
 
@@ -19,8 +20,9 @@ read [`docs/plugin-authoring.md`](docs/plugin-authoring.md).
 
     cargo build --release
 
-The binary ends up at `target/release/backupcrawl`. The git and pacman detectors
-are embedded in the binary, so no plugin directory is required.
+The binary ends up at `target/release/backupcrawl`. The git, pacman and
+syncthing detectors are embedded in the binary, so no plugin directory is
+required.
 
 ## Tests
 
@@ -46,7 +48,7 @@ the baseline policy.
     backupcrawl / --ignore '**/node_modules' --ignore '/proc'
     backupcrawl --config ./backupcrawl.toml
     backupcrawl --no-plugins            # loose/denied walk only
-    backupcrawl --plugins git,pacman    # run only the named detectors
+    backupcrawl --plugins git,pacman,syncthing    # run only the named detectors
 
 Console output shows per-plugin panels (Dirty / Unsynced / Unknown, plus Clean
 with `--all`), the "Not backed up" and "Permission denied" panels, and a
@@ -93,6 +95,14 @@ Writing a detector is covered in
     db-path     = "/var/lib/pacman"
     check-level = "metadata"             # metadata | checksum
     # backend = "native"                 # "pacman" (-Qkk) is not implemented yet
+
+    [plugins.syncthing]
+    # address     = "http://127.0.0.1:8384"  # defaults to <gui><address>
+    # api-key     = "..."                    # defaults to <gui><apikey>
+    require-daemon       = true
+    assume-marker-only   = false
+    receive-only-changes = "dirty"           # dirty | ahead | clean
+    # timeout-ms  = 5000                   # reserved; the host HTTP limit applies
 
 `--ignore` globs are appended to the configured ones. A leading `~` in a pattern
 is expanded to your home directory. Unknown top-level config tables are rejected

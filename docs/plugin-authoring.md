@@ -7,9 +7,11 @@ result. This document is the hands-on guide; the design rationale lives in
 [`rust-rewrite-plan.md`](rust-rewrite-plan.md) (§3–§5).
 
 The bundled [`plugins/git`](../plugins/git) detector is the reference
-implementation, and [`plugins/pacman`](../plugins/pacman) is the second bundled
-detector (native database parsing, no `exec`). The SDK ships a complete worked
-example at `crates/backupcrawl-plugin-sdk/example-plugin`.
+implementation, [`plugins/pacman`](../plugins/pacman) is the second bundled
+detector (native database parsing, no `exec`) and
+[`plugins/syncthing`](../plugins/syncthing) shows the `http` import talking to a
+localhost REST API. The SDK ships a complete worked example at
+`crates/backupcrawl-plugin-sdk/example-plugin`.
 
 ## The model: three questions per path
 
@@ -142,11 +144,24 @@ through the `Host` trait, and the host grants only what the manifest declares:
 | `http(request)` | HTTP to an allowlisted origin (localhost-only by default) | `http = ["host"]` |
 | `log(level, message)` | Structured logging | always |
 
+The syncthing detector is the worked example for `http`: it queries
+`GET http://127.0.0.1:8384/rest/db/status?folder=<id>` with an `X-API-Key`
+header, maps `state`/`needFiles`/`pullErrors`/`receiveOnlyChanged*`, and caches
+one response per folder per scan (the endpoint is documented as expensive).
+Its manifest grants `http = ["http://127.0.0.1:8384"]`,
+`fs-read = ["~/.local/state/syncthing", "~/.config/syncthing"]` and
+`cache = true`; `[plugins.syncthing]` accepts `address`, `api-key`,
+`require-daemon`, `assume-marker-only`, `receive-only-changes` and `timeout-ms`
+(plus the `config-dir` test hook).
+
 File **content** is read through standard `std::fs` / WASI. Since M2.0 the host
 grants read-only preopens for the **crawl root** plus every resolved
 `[capabilities].fs-read` root, each mounted at its own absolute path, so
 `std::fs` and crates like `gix` work while paths outside the grant stay
-invisible and wasmtime rejects every write. An `fs-read` spec may use a leading
+invisible and wasmtime rejects every write. The guest environment contains no
+host variables except the path variables `HOME`, `STCONFDIR` and the XDG base
+directories (`XDG_CONFIG_HOME`, `XDG_STATE_HOME`, `XDG_DATA_HOME`), which is
+what `~`-relative config discovery uses. An `fs-read` spec may use a leading
 `~` and shell-style globs (`~/.local/state/syncthing*`) and must resolve to an
 existing directory; an unresolved spec is a warning, not a load error. A
 plugin with genuinely system-wide needs declares `/` and is shown as
@@ -269,6 +284,8 @@ scripts are the working reference:
 - `scripts/build-git-plugin.sh` — bundled git detector, `--target wasm32-wasip2`,
   reproducible with `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1`.
 - `scripts/build-pacman-plugin.sh` — bundled pacman detector, same pattern.
+- `scripts/build-syncthing-plugin.sh` — bundled syncthing detector, same
+  pattern; its golden tests run the component against a local fake REST daemon.
 
 > Reproducibility: the committed fixture artifacts are part of the repo and CI
 > fails if they are stale. Build the bundled detectors through their scripts:

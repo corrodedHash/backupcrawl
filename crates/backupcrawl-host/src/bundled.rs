@@ -7,10 +7,11 @@
 //!
 //! # Status
 //!
-//! The registry is filled by M1.8 with the git detector and by M2.1 with the
-//! pacman detector. `plugins/git` and `plugins/pacman` are built with `cargo
-//! component build --target wasm32-wasip2 --release` (see
-//! `scripts/build-git-plugin.sh` and `scripts/build-pacman-plugin.sh`), the
+//! The registry is filled by M1.8 with the git detector, by M2.1 with the
+//! pacman detector and by M3.2 with the syncthing detector. `plugins/git`,
+//! `plugins/pacman` and `plugins/syncthing` are built with `cargo component
+//! build --target wasm32-wasip2 --release` (see `scripts/build-git-plugin.sh`,
+//! `scripts/build-pacman-plugin.sh` and `scripts/build-syncthing-plugin.sh`), the
 //! component is copied to `<plugin>/dist/<name>.wasm` and its manifest to
 //! `<plugin>/dist/plugin.toml`, and both are embedded below.
 //!
@@ -40,6 +41,11 @@ pub const REGISTRY: &[BundledPlugin] = &[
         name: "pacman",
         manifest: include_bytes!("../../../plugins/pacman/dist/plugin.toml"),
         wasm: include_bytes!("../../../plugins/pacman/dist/pacman.wasm"),
+    },
+    BundledPlugin {
+        name: "syncthing",
+        manifest: include_bytes!("../../../plugins/syncthing/dist/plugin.toml"),
+        wasm: include_bytes!("../../../plugins/syncthing/dist/syncthing.wasm"),
     },
 ];
 

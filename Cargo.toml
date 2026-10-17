@@ -10,6 +10,7 @@ members = [
     "crates/test-components",
     "plugins/git",
     "plugins/pacman",
+    "plugins/syncthing",
 ]
 # The gix feasibility spike (M1.7) is a standalone workspace with its own lockfile
 # and a wasm component crate; keep it out of the main workspace. `vendor/` holds
@@ -52,6 +53,9 @@ log = "0.4"
 # MD5 is still the digest most pacman mtree entries carry; `sha2` is the
 # optional stronger one.
 md-5 = "0.10"
+# Syncthing configuration is XML; roxmltree is a small, non-validating read-only
+# parser with no wasm-specific dependencies.
+roxmltree = "0.21"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"

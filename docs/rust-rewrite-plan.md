@@ -151,8 +151,9 @@ Key decisions:
 ### Why WASM is still right (and why `exec` is minimized)
 
 WASM gives ABI isolation and a real sandbox for the guest code itself: a detector cannot open
-files, read environment variables, open sockets or spawn processes by accident — every privileged
-operation goes through a capability the host grants. Those capabilities are declared in the
+files, read the ambient environment, open sockets or spawn processes by accident — only the path
+variables (`HOME`, `STCONFDIR`, `XDG_*`) and every other privileged operation go through a
+capability the host grants. Those capabilities are declared in the
 manifest and auditable. The chosen design minimizes `exec`: git reads repository data with a pure
 Rust implementation (`gix`; feasibility spike in M1) and pacman parses its local database
 directly, so only chezmoi (`exec = ["chezmoi"]`) among the bundled detectors spawns a process —
@@ -972,7 +973,8 @@ ships on gix by default in this milestone or only behind `backend = "exec"`.
   *Done when:* fixture-based tests cover precedence, api mismatch, unknown keys and capability
   errors; `plugins list|info` output is golden-tested.
 - **M1.4 wasmtime host runtime + imports + limits.** Instantiation per detector with a read-only
-  `/` preopen and an empty environment; memory cap (256 MiB default) and fuel/epoch interruption
+  `/` preopen and no ambient environment (M3.2 passes only `HOME`, `STCONFDIR` and the XDG base
+  directories so `~`-relative config discovery works); memory cap (256 MiB default) and fuel/epoch interruption
   (cooperative cancel every ~50 ms); host imports: `stat` (mode/uid/gid/nlink), `exec`
   (program allowlist, timeout, output caps), `cache` (persistent per-plugin KV under
   `$XDG_CACHE_HOME/backupcrawl/plugins/<name>/`), `http` (scheme/host/port/path-prefix
@@ -1328,7 +1330,8 @@ Concrete example — instantiating the git detector for `backupcrawl /home/u`:
 
 - preopen `/home/u` at guest path `/home/u`, read-only (crawl root);
 - preopen `~/.config/git` at its absolute path, read-only (extra manifest grant);
-- empty environment, no sockets, no process API (WASI has none);
+- no ambient environment (only the `HOME`/`STCONFDIR`/`XDG_*` path variables), no sockets, no
+  process API (WASI has none);
 - plugin code does `std::fs::read_to_string("/home/u/proj/.git/HEAD")` and it works.
 
 The sandbox is enforced by wasmtime's `cap-std` layer: `..` escapes and symlinks that leave the

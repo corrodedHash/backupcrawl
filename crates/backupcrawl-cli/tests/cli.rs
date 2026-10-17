@@ -262,10 +262,11 @@ fn plugins_list_shows_sorted_table_and_load_errors() {
             vec!["NAME", "VERSION", "SOURCE", "API", "ENABLED", "TRUST"],
             vec!["alpha", "2.0.0", "explicit", "ok", "yes", "new"],
             vec!["demo", "0.1.0", "explicit", "ok", "yes", "new"],
-            // The bundled git and pacman detectors are part of discovery from
-            // M1.8/M2.1 on.
+            // The bundled git, pacman and syncthing detectors are part of
+            // discovery from M1.8/M2.1/M3.2 on.
             vec!["git", "0.1.0", "bundled", "ok", "yes", "bundled"],
             vec!["pacman", "0.1.0", "bundled", "ok", "yes", "bundled"],
+            vec!["syncthing", "0.1.0", "bundled", "ok", "yes", "bundled"],
         ]
     );
 
@@ -306,6 +307,7 @@ fn plugins_list_reflects_enabled_and_trust_config() {
             // Only `demo` is enabled, so the bundled detectors are disabled.
             vec!["git", "0.1.0", "bundled", "ok", "no", "bundled"],
             vec!["pacman", "0.1.0", "bundled", "ok", "no", "bundled"],
+            vec!["syncthing", "0.1.0", "bundled", "ok", "no", "bundled"],
         ]
     );
 }
@@ -362,6 +364,43 @@ fn plugins_info_prints_manifest_and_capabilities() {
     let source = get("source").expect("source field");
     assert!(source.starts_with("explicit ("), "got: {source}");
     assert!(source.ends_with("/demo)"), "got: {source}");
+}
+
+#[test]
+fn plugins_info_shows_the_bundled_syncthing_capabilities() {
+    let xdg = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let state = home.path().join(".local/state/syncthing");
+    let config = home.path().join(".config/syncthing");
+    fs::create_dir_all(&state).unwrap();
+    fs::create_dir_all(&config).unwrap();
+
+    let output = plugins_command(xdg.path())
+        .env("HOME", home.path())
+        .args(["plugins", "info", "syncthing"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let fields = info_fields(&stdout);
+    let get = |key: &str| {
+        fields
+            .iter()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value.as_str())
+    };
+
+    assert_eq!(get("priority"), Some("40"));
+    assert_eq!(get("hooks"), Some("dir"));
+    assert_eq!(get("exec"), Some("(none)"));
+    let expected_fs = format!("read {}, {}", config.display(), state.display());
+    assert_eq!(get("fs"), Some(expected_fs.as_str()));
+    assert_eq!(get("http"), Some("http://127.0.0.1:8384"));
+    assert_eq!(get("cache"), Some("yes"));
 }
 
 #[test]
