@@ -27,7 +27,7 @@ Integration branch: `feat/rust-rewrite` in `/var/lib/opencode-agent/coding/backu
 | --- | --- | --- |
 | M2.0 contract hardening | `feat/m2.0-contract-hardening` | done, merged as `fbc5dd2` |
 | M2 pacman + symlinks | `feat/m2-pacman-symlinks` | done, merged as `72d8f3c` |
-| M4a parallel + progress | `feat/m4a-parallel-progress` | implemented on branch, awaiting review |
+| M4a parallel + progress | `feat/m4a-parallel-progress` | done, merged as `fb9e06e` |
 | M3.1 chezmoi | `feat/m3.1-chezmoi` | not started |
 | M3.2 syncthing | `feat/m3.2-syncthing` | not started |
 
@@ -138,6 +138,14 @@ Integration branch: `feat/rust-rewrite` in `/var/lib/opencode-agent/coding/backu
   vs 12 ms at `--jobs 8` (debug binary, warm cache), with byte-identical JSON at 1/4/8. Deviations:
   denied paths are now sorted globally and merged plugin notes are sorted (the M4a determinism
   normalization); `scripts/build-git-plugin.sh`/`scripts/build-pacman-plugin.sh` rebuild
-  reproducibly, but the git artifact's rebuild in this worktree differs from the committed blob
+  reproducibly, but the git artifact's rebuild in this worktree differed from the committed blob
   only in embedded `CARGO_HOME`/`RUSTUP_HOME` source paths, so the committed artifact was left
-  untouched.
+  untouched at merge time.
+- 2026-10-17: **M4a merged** (`fb9e06e`); acceptance re-run on the merged tree with
+  `scripts/test-stats.py --check` green (259 tests, ~5.4 s warm wall, ~20 s CPU, 178 MiB peak
+  RSS). The embedded-path reproducibility problem found during M4a was fixed separately
+  (`ae716b6`): all wasm build scripts now source `scripts/wasm-build-env.sh`, which sets a single
+  release codegen unit and remaps `CARGO_HOME`/`RUSTUP_HOME`/checkout/target prefixes, and the
+  committed `git`/`pacman`/`test-detector`/`dotbak` components were rebuilt from it. A cross-
+  `CARGO_HOME` rebuild of the test fixture is byte-identical, and no machine paths remain in the
+  artifacts. Baseline refreshed after the rebuild.
