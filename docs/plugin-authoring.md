@@ -307,9 +307,11 @@ $ backupcrawl plugins verify
   The WASI sandbox also refuses `std::fs::read_link` for a link whose *stored
   target is absolute* (`EPERM`); use `LinkInfo.target` from `check_symlink` for
   those, which the walker computed outside the sandbox.
-- The host uses singular `check_file` calls rather than `check_files` (M4).
-- Parallel crawling is not enabled yet, but the per-worker contract above is
-  already the target: do not build single-instance assumptions.
+- The host uses singular `check_file` calls rather than `check_files` (bulk calls
+  remain an optimization; M4b+).
+- Parallel crawling is live: `--jobs N` runs N workers, each with its own instance
+  under the per-worker contract above. `--progress` is a host-side stderr display
+  and never reaches plugins.
 - `[config-schema]` is parsed but not enforced; validate your own config in
   `init` and return a `DetectorError` for bad values.
 - `exec` children are not sandboxed; keep the allowlist as small as possible.

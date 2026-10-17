@@ -27,7 +27,7 @@ Integration branch: `feat/rust-rewrite` in `/var/lib/opencode-agent/coding/backu
 | --- | --- | --- |
 | M2.0 contract hardening | `feat/m2.0-contract-hardening` | done, merged as `fbc5dd2` |
 | M2 pacman + symlinks | `feat/m2-pacman-symlinks` | done, merged as `72d8f3c` |
-| M4a parallel + progress | `feat/m4a-parallel-progress` | not started |
+| M4a parallel + progress | `feat/m4a-parallel-progress` | implemented on branch, awaiting review |
 | M3.1 chezmoi | `feat/m3.1-chezmoi` | not started |
 | M3.2 syncthing | `feat/m3.2-syncthing` | not started |
 
