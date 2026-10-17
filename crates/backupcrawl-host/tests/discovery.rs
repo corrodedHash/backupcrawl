@@ -55,6 +55,7 @@ fn discovers_sources_in_precedence_order() {
             ("unknown-keys", "0.2.0", PluginSource::Explicit),
             ("pacman", "1.0.0", PluginSource::User),
             ("chezmoi", "0.1.0", PluginSource::System),
+            ("syncthing", "0.1.0", PluginSource::Bundled),
         ],
         "explicit/user > system precedence must be stable"
     );

@@ -5,7 +5,9 @@
 //! cancellation flag and the epoch watchdog. [`Runtime::instantiate`] compiles a
 //! detector component and builds a [`WasmDetector`]: **one [`Store`] per
 //! detector** (a store is not `Sync`, section 9), with read-only preopens for
-//! the granted filesystem roots ([`crate::fs`]) and an empty environment.
+//! the granted filesystem roots ([`crate::fs`]) and an environment limited to
+//! the path variables (`HOME`, `STCONFDIR`, `XDG_*`) detectors need to resolve
+//! their config roots.
 //!
 //! [`WasmDetector`] implements the core
 //! [`Detector`](backupcrawl_core::detector::Detector) trait. Its inherent API

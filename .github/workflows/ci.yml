@@ -88,3 +88,8 @@ jobs:
         run: |
           scripts/build-chezmoi-plugin.sh
           git diff --exit-code -- plugins/chezmoi/dist/chezmoi.wasm
+      # Same for the bundled syncthing plugin.
+      - name: Rebuild the bundled syncthing plugin and fail on a stale artifact
+        run: |
+          scripts/build-syncthing-plugin.sh
+          git diff --exit-code -- plugins/syncthing/dist/syncthing.wasm

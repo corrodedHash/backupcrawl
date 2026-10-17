@@ -254,8 +254,10 @@ impl HostState {
     ///
     /// This is the constructor the runtime uses for the test-oriented
     /// `Runtime::instantiate`; the crawl-aware instantiation goes through
-    /// [`HostState::with_grants`]. The WASI context always has an **empty
-    /// environment and argument list**. `cache_root` is the base cache
+    /// [`HostState::with_grants`]. The WASI context has **no arguments and no
+    /// inherited environment**, apart from the path variables `HOME`,
+    /// `STCONFDIR` and the XDG base directories (see [`HostState::with_grants`]).
+    /// `cache_root` is the base cache
     /// directory (`$XDG_CACHE_HOME/backupcrawl/plugins` by default); each plugin
     /// gets a subdirectory named after itself.
     pub fn new(
@@ -290,8 +292,22 @@ impl HostState {
         let plugin_name = plugin_name.into();
 
         let mut ctx = WasiCtxBuilder::new();
-        // Empty environment/args are the builder default; read-only preopens
-        // make writes through `std::fs` fail in `cap-std`.
+        // The environment is empty except for the path variables detectors need
+        // to resolve `~` and tool-specific config roots (syncthing's
+        // `$STCONFDIR`, chezmoi's XDG layout). Nothing else from the host
+        // process — credentials, tokens, the full environment — is leaked.
+        for key in [
+            "HOME",
+            "STCONFDIR",
+            "XDG_CONFIG_HOME",
+            "XDG_STATE_HOME",
+            "XDG_DATA_HOME",
+        ] {
+            if let Some(value) = std::env::var_os(key) {
+                ctx.env(key, value.to_string_lossy());
+            }
+        }
+        // Read-only preopens make writes through `std::fs` fail in `cap-std`.
         for root in grants.roots() {
             ctx.preopened_dir(
                 &root.host,

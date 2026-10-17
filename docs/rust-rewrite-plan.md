@@ -151,8 +151,9 @@ Key decisions:
 ### Why WASM is still right (and why `exec` is minimized)
 
 WASM gives ABI isolation and a real sandbox for the guest code itself: a detector cannot open
-files, read environment variables, open sockets or spawn processes by accident — every privileged
-operation goes through a capability the host grants. Those capabilities are declared in the
+files, read the ambient environment, open sockets or spawn processes by accident — only the path
+variables (`HOME`, `STCONFDIR`, `XDG_*`) and every other privileged operation go through a
+capability the host grants. Those capabilities are declared in the
 manifest and auditable. The chosen design minimizes `exec`: git reads repository data with a pure
 Rust implementation (`gix`; feasibility spike in M1) and pacman parses its local database
 directly, so only chezmoi (`exec = ["chezmoi"]`) among the bundled detectors spawns a process —
@@ -254,6 +255,11 @@ Design notes:
 - **Grants are visible.** The manifest's resolved `fs-read` roots and `exec`/`http` lists are
   printed by `plugins info` and the trust prompt, together with the manifest hash. Unresolved
   specs are warnings; a plugin that declares `/` is shown as `read /`.
+- **Environment is path configuration only.** The WASI context has no inherited environment
+  except `HOME`, `STCONFDIR` and the `XDG_CONFIG_HOME`/`XDG_STATE_HOME`/`XDG_DATA_HOME` path
+  variables, so detectors can resolve `~` and their tool-specific config roots without leaking
+  credentials or arbitrary host state. `exec` children still start from an empty environment and
+  receive only the request's explicit variables.
 - **State lives in the plugin instance** (one wasm instance = one mutable state); `init` builds
   caches, `finish` may flush to the host cache.
 - **Bulk calls are an optimization only.** `check-files` exists so the host can pass all files of
@@ -792,6 +798,8 @@ buggy or malicious. The host protects the machine.
   is nothing to escape to). The resolved `fs-read` roots are printed in `plugins info` and the
   trust prompt, and they are the actual content scope; a plugin that declares `/` is shown as
   `read /`. The metadata `stat` import remains unrestricted and metadata-only.
+- **The guest environment is path configuration only** (`HOME`, `STCONFDIR`, `XDG_*`), never the
+  host's full environment; `exec` children still get exactly the variables in the request.
 - **exec is the escape hatch.** A spawned `chezmoi` (or any allowlisted program a third-party
   plugin declares) runs with the user's rights and is *not* sandboxed. This is why the bundled git
   and pacman detectors avoid exec and why the capability must be loud: `backupcrawl plugins info
@@ -972,7 +980,8 @@ ships on gix by default in this milestone or only behind `backend = "exec"`.
   *Done when:* fixture-based tests cover precedence, api mismatch, unknown keys and capability
   errors; `plugins list|info` output is golden-tested.
 - **M1.4 wasmtime host runtime + imports + limits.** Instantiation per detector with a read-only
-  `/` preopen and an empty environment; memory cap (256 MiB default) and fuel/epoch interruption
+  `/` preopen and no ambient environment (M3.2 passes only `HOME`, `STCONFDIR` and the XDG base
+  directories so `~`-relative config discovery works); memory cap (256 MiB default) and fuel/epoch interruption
   (cooperative cancel every ~50 ms); host imports: `stat` (mode/uid/gid/nlink), `exec`
   (program allowlist, timeout, output caps), `cache` (persistent per-plugin KV under
   `$XDG_CACHE_HOME/backupcrawl/plugins/<name>/`), `http` (scheme/host/port/path-prefix
@@ -1328,7 +1337,8 @@ Concrete example — instantiating the git detector for `backupcrawl /home/u`:
 
 - preopen `/home/u` at guest path `/home/u`, read-only (crawl root);
 - preopen `~/.config/git` at its absolute path, read-only (extra manifest grant);
-- empty environment, no sockets, no process API (WASI has none);
+- no ambient environment (only the `HOME`/`STCONFDIR`/`XDG_*` path variables), no sockets, no
+  process API (WASI has none);
 - plugin code does `std::fs::read_to_string("/home/u/proj/.git/HEAD")` and it works.
 
 The sandbox is enforced by wasmtime's `cap-std` layer: `..` escapes and symlinks that leave the
