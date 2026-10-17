@@ -13,6 +13,13 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
+# Resolve (and export) the target directory the same way the nested example
+# build does, so the artifact lookup below honors a config-based
+# `[build] target-dir` instead of assuming the in-tree `target/`.
+# shellcheck source=scripts/wasm-build-env.sh
+. "$root/scripts/wasm-build-env.sh"
+wasm_build_env "$root"
+
 fixture_dir="crates/backupcrawl-cli/tests/fixtures/detectors/dotbak"
 
 # The committed fixture is the release component; default to it so a bare

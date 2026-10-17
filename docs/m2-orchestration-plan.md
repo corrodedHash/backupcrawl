@@ -82,8 +82,13 @@ Integration branch: `feat/rust-rewrite` in `/var/lib/opencode-agent/coding/backu
 
 ## Environment notes
 
-- Build with `CARGO_TARGET_DIR=/var/lib/opencode-agent/targets/<task>` to keep generated
-  artifacts off the repository filesystem.
+- Builds share one machine-level cache: `~/.cargo/config.toml` sets
+  `[build] target-dir = "/var/lib/opencode-agent/targets/shared"`, so every worktree reuses the
+  same compiled dependency graph and generated artifacts stay off the repository filesystem (a
+  6 GB tmpfs). Do **not** set a per-task `CARGO_TARGET_DIR` — an explicit env var overrides the
+  shared dir and reintroduces a full ~8 GB dependency rebuild per task.
+- The dev profile is trimmed to `debug = 1` (repo `.cargo/config.toml`) to keep debug `target/`
+  sizes manageable; release/WASM artifacts are unaffected.
 - `cargo component` 0.21.1 is installed; plugin builds default to `wasm32-wasip1` and the git
   plugin uses `wasm32-wasip2`.
 - The git plugin build must stay byte-reproducible
@@ -149,3 +154,12 @@ Integration branch: `feat/rust-rewrite` in `/var/lib/opencode-agent/coding/backu
   committed `git`/`pacman`/`test-detector`/`dotbak` components were rebuilt from it. A cross-
   `CARGO_HOME` rebuild of the test fixture is byte-identical, and no machine paths remain in the
   artifacts. Baseline refreshed after the rebuild.
+- 2026-10-17: **Build cache consolidated.** Every worktree previously built its own
+  `CARGO_TARGET_DIR=/var/lib/opencode-agent/targets/<task>`, recompiling the wasmtime/cranelift/gix
+  graph (~8 GB) per task; leftover dirs reached ~49 GB. Now a machine-level
+  `~/.cargo/config.toml` pins `[build] target-dir = "/var/lib/opencode-agent/targets/shared"` so
+  all worktrees reuse one dependency cache (cargo serialises concurrent builds with a build lock),
+  and the repo `.cargo/config.toml` sets `[profile.dev] debug = 1` to shrink each build. The wasm
+  build scripts (`scripts/wasm-build-env.sh`, `scripts/build-cli-fixture-plugin.sh`) now resolve
+  the effective target dir via `cargo metadata`, so they honor the config instead of assuming the
+  in-tree `target/`. Committed WASM artifacts remain byte-identical (release profile unchanged).

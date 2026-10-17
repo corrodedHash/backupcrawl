@@ -241,8 +241,35 @@ def env_fingerprint() -> dict[str, Any]:
 
 
 def target_dir() -> Path:
-    path = Path(os.environ.get("CARGO_TARGET_DIR", "target"))
-    return path if path.is_absolute() else ROOT / path
+    """The target directory cargo actually uses.
+
+    An explicit CARGO_TARGET_DIR wins; otherwise ask cargo so that a
+    `[build] target-dir` from `.cargo/config.toml` (e.g. the machine-level
+    shared build cache) is honored instead of the in-tree default.
+    """
+
+    env = os.environ.get("CARGO_TARGET_DIR")
+    if env:
+        path = Path(env)
+        return path if path.is_absolute() else ROOT / path
+    try:
+        completed = subprocess.run(
+            [
+                "cargo",
+                "metadata",
+                "--no-deps",
+                "--format-version",
+                "1",
+                "--manifest-path",
+                str(ROOT / "Cargo.toml"),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return Path(json.loads(completed.stdout)["target_directory"])
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+        return ROOT / "target"
 
 
 def dir_size_bytes(path: Path) -> int | None:
