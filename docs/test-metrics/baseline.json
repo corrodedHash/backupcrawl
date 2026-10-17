@@ -8,30 +8,30 @@
     "target_dir": "/var/lib/opencode-agent/targets/status-check"
   },
   "totals": {
-    "tests": 196,
-    "wall_s": 3.3409,
-    "cpu_s": 17.5313,
-    "max_rss_mib": 175.17,
+    "tests": 250,
+    "wall_s": 5.272,
+    "cpu_s": 20.1144,
+    "max_rss_mib": 183.2,
     "read_mib": 0.0,
-    "write_mib": 0.01
+    "write_mib": 0.09
   },
   "build": {
-    "wall_s": 0.1761,
-    "cpu_s": 0.1762,
-    "max_rss_mib": 90.78
+    "wall_s": 0.1752,
+    "cpu_s": 0.1759,
+    "max_rss_mib": 91.62
   },
   "cold_jit": {
-    "wall_s": 9.2418,
-    "user_s": 126.0886,
-    "sys_s": 0.5434,
-    "cpu_s": 126.6321,
-    "max_rss_mib": 245.69,
+    "wall_s": 8.8933,
+    "user_s": 124.1349,
+    "sys_s": 0.3161,
+    "cpu_s": 124.451,
+    "max_rss_mib": 239.43,
     "read_mib": 0.0,
     "write_mib": 0.0,
-    "minflt": 58810,
+    "minflt": 57147,
     "majflt": 0,
-    "nvcsw": 1559,
-    "nivcsw": 20723,
+    "nvcsw": 1552,
+    "nivcsw": 6369,
     "exit_code": 0,
     "test": "ahead_of_upstream_is_ahead",
     "passed": 1,
@@ -42,9 +42,9 @@
     {
       "name": "backupcrawl",
       "tests": 6,
-      "wall_s": 0.0021,
-      "cpu_s": 0.0035,
-      "max_rss_mib": 20.74,
+      "wall_s": 0.0029,
+      "cpu_s": 0.0043,
+      "max_rss_mib": 20.38,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
@@ -53,148 +53,166 @@
       "tests": 4,
       "wall_s": 0.0017,
       "cpu_s": 0.002,
-      "max_rss_mib": 20.74,
+      "max_rss_mib": 20.38,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "backupcrawl_host",
       "tests": 32,
-      "wall_s": 0.1058,
-      "cpu_s": 0.0152,
-      "max_rss_mib": 20.74,
+      "wall_s": 0.1053,
+      "cpu_s": 0.0183,
+      "max_rss_mib": 20.38,
       "read_mib": 0.0,
-      "write_mib": 0.0
+      "write_mib": 0.04
     },
     {
       "name": "backupcrawl_plugin_example",
       "tests": 6,
-      "wall_s": 0.0026,
-      "cpu_s": 0.0035,
-      "max_rss_mib": 20.74,
+      "wall_s": 0.0031,
+      "cpu_s": 0.0043,
+      "max_rss_mib": 20.38,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "backupcrawl_plugin_git",
       "tests": 22,
-      "wall_s": 0.0025,
-      "cpu_s": 0.0058,
-      "max_rss_mib": 20.74,
+      "wall_s": 0.0032,
+      "cpu_s": 0.008,
+      "max_rss_mib": 20.38,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "backupcrawl_plugin_pacman",
+      "tests": 30,
+      "wall_s": 0.0028,
+      "cpu_s": 0.0074,
+      "max_rss_mib": 20.38,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "backupcrawl_plugin_sdk",
       "tests": 7,
-      "wall_s": 0.001,
-      "cpu_s": 0.0013,
-      "max_rss_mib": 20.74,
+      "wall_s": 0.0014,
+      "cpu_s": 0.0018,
+      "max_rss_mib": 20.38,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "backupcrawl_test_components",
       "tests": 0,
-      "wall_s": 0.0008,
-      "cpu_s": 0.0007,
-      "max_rss_mib": 20.74,
+      "wall_s": 0.0012,
+      "cpu_s": 0.001,
+      "max_rss_mib": 20.38,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "backupcrawl_wit",
       "tests": 1,
-      "wall_s": 0.0042,
-      "cpu_s": 0.0041,
-      "max_rss_mib": 20.74,
+      "wall_s": 0.0041,
+      "cpu_s": 0.0039,
+      "max_rss_mib": 20.38,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "cli",
-      "tests": 22,
-      "wall_s": 0.4773,
-      "cpu_s": 1.1721,
-      "max_rss_mib": 68.74,
+      "tests": 25,
+      "wall_s": 2.4646,
+      "cpu_s": 4.1062,
+      "max_rss_mib": 117.91,
       "read_mib": 0.0,
-      "write_mib": 0.0
+      "write_mib": 0.01
     },
     {
       "name": "detector_walker",
-      "tests": 9,
-      "wall_s": 0.0022,
-      "cpu_s": 0.004,
-      "max_rss_mib": 20.74,
+      "tests": 17,
+      "wall_s": 0.0027,
+      "cpu_s": 0.0067,
+      "max_rss_mib": 20.38,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "discovery",
       "tests": 12,
-      "wall_s": 0.0029,
-      "cpu_s": 0.0113,
-      "max_rss_mib": 20.74,
+      "wall_s": 0.0027,
+      "cpu_s": 0.0114,
+      "max_rss_mib": 20.38,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "fixture_smoke",
       "tests": 1,
-      "wall_s": 0.0207,
-      "cpu_s": 0.021,
-      "max_rss_mib": 36.41,
+      "wall_s": 0.0224,
+      "cpu_s": 0.0226,
+      "max_rss_mib": 37.3,
       "read_mib": 0.0,
-      "write_mib": 0.01
+      "write_mib": 0.04
     },
     {
       "name": "git_plugin",
       "tests": 23,
-      "wall_s": 0.7377,
-      "cpu_s": 5.5991,
-      "max_rss_mib": 61.67,
+      "wall_s": 0.7327,
+      "cpu_s": 5.5832,
+      "max_rss_mib": 62.35,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "git_plugin_exec",
       "tests": 13,
-      "wall_s": 1.3589,
-      "cpu_s": 9.7306,
-      "max_rss_mib": 58.91,
+      "wall_s": 1.2348,
+      "cpu_s": 9.0583,
+      "max_rss_mib": 60.16,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "pacman_plugin",
+      "tests": 13,
+      "wall_s": 0.0495,
+      "cpu_s": 0.2751,
+      "max_rss_mib": 48.58,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "runtime",
       "tests": 16,
-      "wall_s": 0.1476,
-      "cpu_s": 0.4329,
-      "max_rss_mib": 55.68,
+      "wall_s": 0.1429,
+      "cpu_s": 0.4562,
+      "max_rss_mib": 62.31,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "trust",
       "tests": 15,
-      "wall_s": 0.0047,
-      "cpu_s": 0.0139,
-      "max_rss_mib": 20.74,
+      "wall_s": 0.0043,
+      "cpu_s": 0.0135,
+      "max_rss_mib": 20.38,
       "read_mib": 0.0,
       "write_mib": 0.0
     },
     {
       "name": "walker",
       "tests": 6,
-      "wall_s": 0.0029,
-      "cpu_s": 0.0053,
-      "max_rss_mib": 20.74,
+      "wall_s": 0.0024,
+      "cpu_s": 0.0046,
+      "max_rss_mib": 20.38,
       "read_mib": 0.0,
       "write_mib": 0.0
     }
   ],
   "artifacts": {
-    "target_bytes": 15761139878,
+    "target_bytes": 29167887054,
     "wasm": [
       {
         "path": "crates/backupcrawl-cli/tests/fixtures/detectors/dotbak/dotbak.wasm",
@@ -259,6 +277,10 @@
       {
         "path": "plugins/git/dist/git.wasm",
         "bytes": 3393736
+      },
+      {
+        "path": "plugins/pacman/dist/pacman.wasm",
+        "bytes": 423949
       }
     ]
   }
