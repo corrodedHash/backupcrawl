@@ -7,11 +7,12 @@
 //!
 //! # Status
 //!
-//! The registry is filled by M1.8 with the git detector. `plugins/git` is built
-//! with `cargo component build -p backupcrawl-plugin-git --target
-//! wasm32-wasip2 --release` (see `scripts/build-git-plugin.sh`), the component
-//! is copied to `plugins/git/dist/git.wasm` and its manifest to
-//! `plugins/git/dist/plugin.toml`, and both are embedded below.
+//! The registry is filled by M1.8 with the git detector and by M2.1 with the
+//! pacman detector. `plugins/git` and `plugins/pacman` are built with `cargo
+//! component build --target wasm32-wasip2 --release` (see
+//! `scripts/build-git-plugin.sh` and `scripts/build-pacman-plugin.sh`), the
+//! component is copied to `<plugin>/dist/<name>.wasm` and its manifest to
+//! `<plugin>/dist/plugin.toml`, and both are embedded below.
 //!
 //! `include_bytes!` paths are relative to this source file
 //! (`crates/backupcrawl-host/src/bundled.rs`), so `../../../plugins/...`
@@ -29,11 +30,18 @@ pub struct BundledPlugin {
 }
 
 /// All bundled detectors, in a stable order.
-pub const REGISTRY: &[BundledPlugin] = &[BundledPlugin {
-    name: "git",
-    manifest: include_bytes!("../../../plugins/git/dist/plugin.toml"),
-    wasm: include_bytes!("../../../plugins/git/dist/git.wasm"),
-}];
+pub const REGISTRY: &[BundledPlugin] = &[
+    BundledPlugin {
+        name: "git",
+        manifest: include_bytes!("../../../plugins/git/dist/plugin.toml"),
+        wasm: include_bytes!("../../../plugins/git/dist/git.wasm"),
+    },
+    BundledPlugin {
+        name: "pacman",
+        manifest: include_bytes!("../../../plugins/pacman/dist/plugin.toml"),
+        wasm: include_bytes!("../../../plugins/pacman/dist/pacman.wasm"),
+    },
+];
 
 /// All bundled detectors, in a stable order.
 pub fn all() -> &'static [BundledPlugin] {

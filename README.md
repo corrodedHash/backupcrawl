@@ -8,9 +8,10 @@ Detect files which are not backed up.
 This repository is the Rust rewrite. Each mechanism is a WebAssembly plugin
 component (wasmtime + the component model) that the binary loads at runtime; the
 core only walks the filesystem, queries the plugins and aggregates the result.
-**git** is the first detector wired up — it reports repository state (clean,
-dirty, unsynced) instead of dumping every tracked file into "not backed up".
-The remaining mechanisms and the roadmap live in
+**git** and **pacman** are the detectors wired up so far — they report
+repository/package state (clean, dirty, unsynced) instead of dumping every
+tracked/owned file into "not backed up". The remaining mechanisms and the
+roadmap live in
 [`docs/rust-rewrite-plan.md`](docs/rust-rewrite-plan.md); plugin authors should
 read [`docs/plugin-authoring.md`](docs/plugin-authoring.md).
 
@@ -18,8 +19,8 @@ read [`docs/plugin-authoring.md`](docs/plugin-authoring.md).
 
     cargo build --release
 
-The binary ends up at `target/release/backupcrawl`. The git detector is embedded
-in the binary, so no plugin directory is required.
+The binary ends up at `target/release/backupcrawl`. The git and pacman detectors
+are embedded in the binary, so no plugin directory is required.
 
 ## Tests
 
@@ -48,9 +49,13 @@ the baseline policy.
     backupcrawl --plugins git,pacman    # run only the named detectors
 
 Console output shows per-plugin panels (Dirty / Unsynced / Unknown, plus Clean
-with `--all`) and the "Not backed up" and "Permission denied" panels; JSON output
-is versioned (`"schema": 1`). A final `plugins: git ok, ...` line summarizes each
-detector's fate.
+with `--all`), the "Not backed up" and "Permission denied" panels, and a
+"Symlinks" panel for links no detector claimed (with a `(dangling)` marker;
+links whose target is in a clean-managed tree show up as clean with `--all`).
+JSON output is versioned (`"schema": 1`) and carries the same data in the
+`not_backed_up`, `permission_denied`, `symlinks` (`path`, `target`, `dangling`,
+optional `via`) and `plugins` arrays. A final `plugins: git ok, ...` line
+summarizes each detector's fate.
 
 ## Plugins
 
@@ -83,6 +88,11 @@ Writing a detector is covered in
     report-ignored = false
     ancestor-repos = true
     # backend = "exec"                   # git CLI fallback instead of gix
+
+    [plugins.pacman]
+    db-path     = "/var/lib/pacman"
+    check-level = "metadata"             # metadata | checksum
+    # backend = "native"                 # "pacman" (-Qkk) is not implemented yet
 
 `--ignore` globs are appended to the configured ones. A leading `~` in a pattern
 is expanded to your home directory. Unknown top-level config tables are rejected

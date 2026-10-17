@@ -24,4 +24,5 @@ wasmtime.workspace = true
 wasmtime-wasi.workspace = true
 
 [dev-dependencies]
+flate2.workspace = true
 tempfile.workspace = true

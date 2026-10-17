@@ -9,6 +9,7 @@ members = [
     "crates/backupcrawl-plugin-sdk/example-plugin",
     "crates/test-components",
     "plugins/git",
+    "plugins/pacman",
 ]
 # The gix feasibility spike (M1.7) is a standalone workspace with its own lockfile
 # and a wasm component crate; keep it out of the main workspace. `vendor/` holds
@@ -32,6 +33,9 @@ clap = { version = "4", features = ["derive"] }
 console = "0.15"
 dirs = "6"
 env_logger = "0.11"
+# The pacman detector reads gzipped BSD mtree databases; the pure-Rust backend
+# keeps the component free of a system zlib dependency.
+flate2 = "1"
 # gix 0.89 without `mmap`/`parallel`/`interrupt`/`command`/`credentials`:
 # `default-features = false` drops `max-performance-safe` (which enables
 # `parallel` and pack caches). `status` pulls `dirwalk` -> `attributes` ->
@@ -44,6 +48,9 @@ globset = "0.4"
 hex = "0.4"
 libc = "0.2"
 log = "0.4"
+# MD5 is still the digest most pacman mtree entries carry; `sha2` is the
+# optional stronger one.
+md-5 = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"
