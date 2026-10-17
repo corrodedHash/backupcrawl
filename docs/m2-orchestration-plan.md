@@ -122,3 +122,22 @@ Integration branch: `feat/rust-rewrite` in `/var/lib/opencode-agent/coding/backu
   ~17.9 s CPU, 175 MiB peak RSS, 14.7 GiB target). The new test metrics harness
   (`scripts/test-stats.py`, `docs/test-metrics.md`) landed just before the merge and CI now runs
   the suite through it.
+- 2026-10-17: **M4a implemented** on `feat/m4a-parallel-progress` (`147a790`, `cda8788`,
+  `01ab867`, `3c9b0ae`), awaiting merge. `walker::crawl(root, ignore, Vec<Vec<DetectorSlot>>,
+  &dyn ProgressSink)` drains a shared FIFO with `std::thread::scope`; one set per worker means
+  every path is still handled once, and the post-walk merge (`assemble`) rebuilds the tree for the
+  original bottom-up loose collapse, sorts claims/denied/symlinks, and merges reports (errors
+  summed, notes sorted union, disabled wins). `init` is serialized by one mutex per crawl (the
+  single-flight cache guard); `finish` runs once per worker instance. Core exposes
+  `ProgressSnapshot`/`ProgressSink`/`NoProgress` with no TTY types; the CLI's `--progress` is an
+  `indicatif` stderr display, throttled to 10 Hz and disabled on a non-TTY. `--jobs N` defaults to
+  1 (`0` = `available_parallelism`); worker sets are built up front and a plugin that fails to
+  instantiate is skipped once. Acceptance on the branch: fmt, clippy `-D warnings`,
+  `scripts/test-stats.py --check` green — **259 tests**, ~5.4 s warm wall, ~20.3 s CPU,
+  178 MiB peak RSS; baseline refreshed. A 10k-file synthetic tree measured 29 ms at `--jobs 1`
+  vs 12 ms at `--jobs 8` (debug binary, warm cache), with byte-identical JSON at 1/4/8. Deviations:
+  denied paths are now sorted globally and merged plugin notes are sorted (the M4a determinism
+  normalization); `scripts/build-git-plugin.sh`/`scripts/build-pacman-plugin.sh` rebuild
+  reproducibly, but the git artifact's rebuild in this worktree differs from the committed blob
+  only in embedded `CARGO_HOME`/`RUSTUP_HOME` source paths, so the committed artifact was left
+  untouched.
