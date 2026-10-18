@@ -515,7 +515,10 @@ Managed detection (ownership) — native:
 
 - Parse `/var/lib/pacman/local/<pkg>-<ver>/files` (one path per line, directories end with `/`)
   plus `desc` (`%NAME%`, `%VERSION%`, `%BACKUP%`). One read of the database directory in `init`,
-  cached in the host cache keyed by its mtime, so parallel workers don't repeat it.
+  cached in the host cache keyed by its mtime **and the crawl root**, so parallel workers don't
+  repeat it. Only paths at or below the crawl root are indexed (and only packages that own such
+  a path have their `mtree` parsed), so scanning `~` or a project tree does not read the whole
+  system database.
 - Paths come from the database verbatim (spaces included), unlike the Python version's
   `split(maxsplit=1)` parsing of `pacman -Ql` output, and no `pacman` binary is needed. The db
   format is stable but not a public API; unrecognized entries → `unknown` with a diagnostic
@@ -757,7 +760,11 @@ third-party plugins exist. See open question 4.
   invalidation keys driven by the plugin (e.g. pacman db mtime, chezmoi source mtime, syncthing
   config mtime). `backupcrawl cache clear` for manual control.
 - Limits: wasmtime fuel/epoch interruption (cooperative cancel every ~50 ms), linear memory
-  limit (e.g. 256 MiB), exec timeout + output caps (e.g. 64 MiB), HTTP timeout + size cap.
+  limit (512 MiB default), a larger fuel budget for `init` than for `check_*`/`finish`
+  (pacman's full-system index needs ~77 billion fuel), exec timeout + output caps (e.g. 64 MiB),
+  HTTP timeout + size cap. Fuel exhaustion in `init` cannot be retried (wasmtime refuses to
+  re-enter a component after a trap), so `init` gets the larger ceiling and logs a warning when
+  it approaches it.
 - Compiled components are cached in two layers: in-memory (keyed by the wasm bytes, one
   compilation per detector per process) and on disk via wasmtime's component cache
   (`$XDG_CACHE_HOME/backupcrawl/plugins/_components`). The bundled git component takes ~10 s
@@ -981,8 +988,8 @@ ships on gix by default in this milestone or only behind `backend = "exec"`.
   errors; `plugins list|info` output is golden-tested.
 - **M1.4 wasmtime host runtime + imports + limits.** Instantiation per detector with a read-only
   `/` preopen and no ambient environment (M3.2 passes only `HOME`, `STCONFDIR` and the XDG base
-  directories so `~`-relative config discovery works); memory cap (256 MiB default) and fuel/epoch interruption
-  (cooperative cancel every ~50 ms); host imports: `stat` (mode/uid/gid/nlink), `exec`
+  directories so `~`-relative config discovery works); memory cap (512 MiB default) and fuel/epoch interruption
+  (cooperative cancel every ~50 ms, with a larger `init` budget); host imports: `stat` (mode/uid/gid/nlink), `exec`
   (program allowlist, timeout, output caps), `cache` (persistent per-plugin KV under
   `$XDG_CACHE_HOME/backupcrawl/plugins/<name>/`), `http` (scheme/host/port/path-prefix
   allowlist, size caps, no redirects to non-allowlisted hosts) and `log`; lifecycle sequencing

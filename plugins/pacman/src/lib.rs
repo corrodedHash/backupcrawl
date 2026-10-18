@@ -16,11 +16,14 @@
 //!   package, so it is `clean`; modified files (including `%BACKUP%` files the
 //!   administrator edited) are `dirty` and need their own backup.
 //!
-//! `init` builds one path → package/mtree index and caches it through the host
-//! cache keyed by the database path and the `local/` mtime. A missing or
-//! unreadable database is an `init` error, so the host disables the plugin with
-//! a visible note; a corrupt cache is ignored and rebuilt. Unparseable mtree
-//! entries produce `unknown` with a diagnostic, never a wrong `clean`.
+//! `init` builds one path → package/mtree index for the paths at or below the
+//! crawl root and caches it through the host cache keyed by the database path,
+//! the crawl root and the `local/` mtime. Scoping keeps a scan of `~` or a
+//! project tree from reading the whole system database; for a full-system scan
+//! the host grants `init` a larger fuel budget than ordinary calls. A missing
+//! or unreadable database is an `init` error, so the host disables the plugin
+//! with a visible note; a corrupt cache is ignored and rebuilt. Unparseable
+//! mtree entries produce `unknown` with a diagnostic, never a wrong `clean`.
 //!
 //! # Config
 //!
@@ -76,7 +79,7 @@ impl Detector for Pacman {
     fn init(&mut self, info: &ScanInfo, host: &mut dyn Host) -> Result<(), DetectorError> {
         self.config = PacmanConfig::from_config(&info.config)?;
         self.root = check::canonical_root(&info.root);
-        self.index = db::load_index(&self.config.db_path, host)?;
+        self.index = db::load_index(&self.config.db_path, &check::path_string(&self.root), host)?;
         host.log(
             LogLevel::Debug,
             &format!(
@@ -235,7 +238,7 @@ mod tests {
 
         let err = detector
             .init(
-                &scan_info(tmp.path(), &[("db-path", db.to_str().unwrap())]),
+                &scan_info(Path::new("/"), &[("db-path", db.to_str().unwrap())]),
                 &mut host,
             )
             .unwrap_err();
@@ -262,7 +265,7 @@ mod tests {
         let mut host = MockHost::new();
         first
             .init(
-                &scan_info(tmp.path(), &[("db-path", db.to_str().unwrap())]),
+                &scan_info(Path::new("/"), &[("db-path", db.to_str().unwrap())]),
                 &mut host,
             )
             .unwrap();
@@ -275,7 +278,7 @@ mod tests {
         let mut host = MockHost::new().with_cache(&key, value);
         second
             .init(
-                &scan_info(tmp.path(), &[("db-path", db.to_str().unwrap())]),
+                &scan_info(Path::new("/"), &[("db-path", db.to_str().unwrap())]),
                 &mut host,
             )
             .unwrap();
@@ -304,13 +307,13 @@ mod tests {
             "./usr/bin/demo type=file size=1 mode=644\n",
         );
         let mtime = std::fs::metadata(db.join("local")).unwrap().modified().ok();
-        let key = db::cache_key(&db, mtime);
+        let key = db::cache_key(&db, "/", mtime);
 
         let mut detector = Pacman::default();
         let mut host = MockHost::new().with_cache(&key, b"not json".to_vec());
         detector
             .init(
-                &scan_info(tmp.path(), &[("db-path", db.to_str().unwrap())]),
+                &scan_info(Path::new("/"), &[("db-path", db.to_str().unwrap())]),
                 &mut host,
             )
             .unwrap();
@@ -324,6 +327,46 @@ mod tests {
             "{:?}",
             host.logs()
         );
+    }
+
+    #[test]
+    fn index_is_scoped_to_the_crawl_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = tmp.path().join("db");
+        write_package(
+            &db,
+            "demo-1.0-1",
+            "demo",
+            "1.0-1",
+            "usr/bin/demo",
+            "",
+            "./usr/bin/demo type=file size=1 mode=644\n",
+        );
+        let db_path = db.to_str().unwrap();
+
+        // A scan outside the package tree must not index (or parse the mtree
+        // of) any package.
+        let mut outside = Pacman::default();
+        let mut host = MockHost::new();
+        outside
+            .init(
+                &scan_info(Path::new("/home/tester"), &[("db-path", db_path)]),
+                &mut host,
+            )
+            .unwrap();
+        assert_eq!(outside.index.len(), 0);
+
+        // The same database still yields the owned path for a root that
+        // contains it.
+        let mut inside = Pacman::default();
+        let mut host = MockHost::new();
+        inside
+            .init(
+                &scan_info(Path::new("/"), &[("db-path", db_path)]),
+                &mut host,
+            )
+            .unwrap();
+        assert_eq!(inside.index.len(), 1);
     }
 
     // -----------------------------------------------------------------------

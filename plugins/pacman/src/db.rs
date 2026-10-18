@@ -12,12 +12,15 @@
 //!   `uid`, `gid`, `mode`, ...), entries are `./path key=value ...` lines, and
 //!   spaces/backslashes in paths are octal escapes (`\040`, `\134`, ...).
 //!
-//! [`load_index`] builds one deterministic path → package/mtree index and
-//! caches it through the host cache, keyed by the database path and the
-//! `local/` directory mtime. A corrupt cache entry is ignored and rebuilt; an
-//! unreadable database is an `init` error (the host disables the plugin with a
-//! visible note). Unparseable *entries* never become a wrong `clean`: they are
-//! flagged and the detector reports `unknown`.
+//! [`load_index`] builds one deterministic path → package/mtree index,
+//! restricted to the paths the scan can ask about (the crawl root and below),
+//! and caches it through the host cache, keyed by the database path, the
+//! `local/` directory mtime and the crawl root. Restricting the index keeps a
+//! scan of `~` or a project tree from parsing the whole system database. A
+//! corrupt cache entry is ignored and rebuilt; an unreadable database is an
+//! `init` error (the host disables the plugin with a visible note). Unparseable
+//! *entries* never become a wrong `clean`: they are flagged and the detector
+//! reports `unknown`.
 //!
 //! The database format is stable but not a public API. This parser knows the
 //! fields the detector needs and ignores everything else.
@@ -31,8 +34,9 @@ use backupcrawl_plugin_sdk::{Host, LogLevel};
 use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 
-/// Version of the serialized cache format. Bump when [`Index`] changes.
-pub const INDEX_FORMAT: u32 = 1;
+/// Version of the serialized cache format. Bump when [`Index`] changes or the
+/// index scope semantics change.
+pub const INDEX_FORMAT: u32 = 2;
 
 /// The package that owns a path and its expected mtree entry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,6 +56,9 @@ pub struct OwnedPath {
 }
 
 /// The deterministic path → package/mtree index for one database snapshot.
+///
+/// Only paths at or below the scan's crawl root are present; the detector is
+/// never asked about anything else.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Index {
     /// Cache format version.
@@ -161,8 +168,9 @@ pub struct Mtree {
     pub errors: Vec<String>,
 }
 
-/// Builds (or loads from the host cache) the index for `<db_path>/local`.
-pub fn load_index(db_path: &Path, host: &mut dyn Host) -> Result<Index, String> {
+/// Builds (or loads from the host cache) the index for `<db_path>/local`,
+/// restricted to `root` and its descendants.
+pub fn load_index(db_path: &Path, root: &str, host: &mut dyn Host) -> Result<Index, String> {
     let local = db_path.join("local");
     let metadata = std::fs::metadata(&local).map_err(|err| {
         format!(
@@ -177,7 +185,7 @@ pub fn load_index(db_path: &Path, host: &mut dyn Host) -> Result<Index, String> 
         ));
     }
 
-    let key = cache_key(db_path, metadata.modified().ok());
+    let key = cache_key(db_path, root, metadata.modified().ok());
     if let Some(bytes) = host.cache_get(&key) {
         match serde_json::from_slice::<Index>(&bytes) {
             Ok(index) if index.format == INDEX_FORMAT => {
@@ -201,7 +209,7 @@ pub fn load_index(db_path: &Path, host: &mut dyn Host) -> Result<Index, String> 
         }
     }
 
-    let index = build_index(&local, host)?;
+    let index = build_index(&local, root, host)?;
     match serde_json::to_vec(&index) {
         Ok(bytes) => {
             if let Err(err) = host.cache_set(&key, &bytes) {
@@ -219,20 +227,23 @@ pub fn load_index(db_path: &Path, host: &mut dyn Host) -> Result<Index, String> 
     Ok(index)
 }
 
-/// The cache key for a database snapshot.
+/// The cache key for a database snapshot and crawl scope.
 ///
-/// Includes the format version, the database path and the `local/` mtime, so a
-/// finished pacman transaction (which changes the directory) invalidates the
-/// index naturally.
-pub fn cache_key(db_path: &Path, mtime: Option<SystemTime>) -> String {
+/// Includes the format version, the database path, the crawl root and the
+/// `local/` mtime, so a finished pacman transaction (which changes the
+/// directory) or a different scan scope invalidates the index naturally.
+pub fn cache_key(db_path: &Path, root: &str, mtime: Option<SystemTime>) -> String {
     let stamp = mtime
         .and_then(|time| time.duration_since(SystemTime::UNIX_EPOCH).ok())
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
-    format!("pacman-index-v{INDEX_FORMAT}:{}:{stamp}", db_path.display())
+    format!(
+        "pacman-index-v{INDEX_FORMAT}:{}:{stamp}:{root}",
+        db_path.display()
+    )
 }
 
-fn build_index(local: &Path, host: &mut dyn Host) -> Result<Index, String> {
+fn build_index(local: &Path, root: &str, host: &mut dyn Host) -> Result<Index, String> {
     let reader = std::fs::read_dir(local).map_err(|err| {
         format!(
             "cannot read pacman database directory {}: {err}",
@@ -270,24 +281,22 @@ fn build_index(local: &Path, host: &mut dyn Host) -> Result<Index, String> {
         format: INDEX_FORMAT,
         entries: BTreeMap::new(),
     };
+    let mut duplicates = 0usize;
     for package_dir in packages {
-        match read_package(&package_dir, host) {
-            Ok((paths, name)) => {
+        match read_package(&package_dir, root, host) {
+            Ok(Some(paths)) => {
                 for (path, owned) in paths {
-                    if let Some(existing) = index.entries.get(&path) {
-                        host.log(
-                            LogLevel::Warn,
-                            &format!(
-                                "pacman: path `{path}` is claimed by both `{}` and `{name}`; \
-                                 keeping the first",
-                                existing.package
-                            ),
-                        );
+                    if index.entries.contains_key(&path) {
+                        // Shared directories are normal (every package owns
+                        // `/usr`, `/usr/bin`, ...); counting them keeps the log
+                        // quiet instead of warning once per shared path.
+                        duplicates += 1;
                         continue;
                     }
                     index.entries.insert(path, owned);
                 }
             }
+            Ok(None) => {}
             Err(err) => host.log(
                 LogLevel::Warn,
                 &format!(
@@ -297,10 +306,18 @@ fn build_index(local: &Path, host: &mut dyn Host) -> Result<Index, String> {
             ),
         }
     }
+    if duplicates > 0 {
+        host.log(
+            LogLevel::Debug,
+            &format!(
+                "pacman: {duplicates} paths are claimed by more than one package; keeping the first"
+            ),
+        );
+    }
     host.log(
         LogLevel::Debug,
         &format!(
-            "pacman: indexed {} paths from {}",
+            "pacman: indexed {} paths under {root} from {}",
             index.len(),
             local.display()
         ),
@@ -309,10 +326,26 @@ fn build_index(local: &Path, host: &mut dyn Host) -> Result<Index, String> {
 }
 
 /// Reads one package directory into `(absolute path, owned path)` pairs.
+///
+/// Returns `None` when the package owns no path at or below `root`; the `files`
+/// list is read first so irrelevant packages never pay for `desc`/`mtree`
+/// parsing (the bulk of the init cost).
 fn read_package(
     package_dir: &Path,
+    root: &str,
     host: &mut dyn Host,
-) -> Result<(Vec<(String, OwnedPath)>, String), String> {
+) -> Result<Option<Vec<(String, OwnedPath)>>, String> {
+    let files_raw = std::fs::read(package_dir.join("files"))
+        .map_err(|err| format!("cannot read files: {err}"))?;
+    let files = parse_files(&files_raw).map_err(|err| format!("cannot parse files: {err}"))?;
+    let files: Vec<String> = files
+        .into_iter()
+        .filter(|path| under_root(path, root))
+        .collect();
+    if files.is_empty() {
+        return Ok(None);
+    }
+
     let desc_raw = std::fs::read(package_dir.join("desc"))
         .map_err(|err| format!("cannot read desc: {err}"))?;
     let desc = parse_desc(&desc_raw).map_err(|err| format!("cannot parse desc: {err}"))?;
@@ -322,10 +355,6 @@ fn read_package(
     let version = desc
         .version
         .ok_or_else(|| "desc has no %VERSION% section".to_owned())?;
-
-    let files_raw = std::fs::read(package_dir.join("files"))
-        .map_err(|err| format!("cannot read files: {err}"))?;
-    let files = parse_files(&files_raw).map_err(|err| format!("cannot parse files: {err}"))?;
 
     let mtree = match std::fs::read(package_dir.join("mtree")) {
         Ok(raw) => match gunzip(&raw) {
@@ -370,7 +399,20 @@ fn read_package(
             },
         ));
     }
-    Ok((out, name))
+    Ok(Some(out))
+}
+
+/// Whether an absolute database path is inside the crawl root.
+///
+/// A crawl only asks about paths at or below `root`, so anything else would
+/// never be looked up. `root` is already lexical-normalized and has no trailing
+/// slash (except `/` itself).
+fn under_root(path: &str, root: &str) -> bool {
+    root == "/"
+        || path == root
+        || path
+            .strip_prefix(root)
+            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 fn gunzip(raw: &[u8]) -> Result<Vec<u8>, String> {
@@ -385,6 +427,11 @@ fn gunzip(raw: &[u8]) -> Result<Vec<u8>, String> {
 /// Parses the `files` database file into absolute paths.
 pub fn parse_files(bytes: &[u8]) -> Result<Vec<String>, String> {
     let text = String::from_utf8_lossy(bytes);
+    // Meta packages (`base`, `base-devel`, ...) ship an empty `files` file: no
+    // paths, not a corrupt database.
+    if text.trim().is_empty() {
+        return Ok(Vec::new());
+    }
     let mut lines = text.lines();
     let header = lines
         .next()
@@ -687,6 +734,12 @@ mod tests {
                 "/opt/x",
             ]
         );
+    }
+
+    #[test]
+    fn files_parser_accepts_an_empty_meta_package() {
+        assert!(parse_files(b"").unwrap().is_empty());
+        assert!(parse_files(b"\n\n").unwrap().is_empty());
     }
 
     #[test]

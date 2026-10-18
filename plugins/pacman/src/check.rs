@@ -204,7 +204,7 @@ fn compare_link(
     }
 }
 
-fn path_string(path: &Path) -> String {
+pub(crate) fn path_string(path: &Path) -> String {
     let text = path.to_string_lossy();
     let trimmed = text.trim_end_matches('/');
     if trimmed.is_empty() {
