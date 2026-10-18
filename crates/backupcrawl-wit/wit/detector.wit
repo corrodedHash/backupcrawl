@@ -67,6 +67,17 @@ interface host {
   cache-get: func(key: string) -> option<list<u8>>;
   cache-set: func(key: string, value: list<u8>) -> result<_, string>;
 
+  /// Read `len` bytes starting at `offset` from a cache entry without loading
+  /// the whole value into guest memory.
+  ///
+  /// Returns `none` when the entry does not exist (a miss, like
+  /// `cache-get`), an empty list when `offset` is at or past the end, and a
+  /// short list for a range that crosses the end. The host caps `len` so a
+  /// single read cannot grow guest memory without bound. Intended for large
+  /// cached indexes (e.g. the pacman path→package table) that are looked up
+  /// entry-by-entry rather than materialized.
+  cache-read: func(key: string, offset: u64, len: u32) -> result<option<list<u8>>, string>;
+
   record http-request {
     method: string,
     url: string,

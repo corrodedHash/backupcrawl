@@ -1,116 +1,137 @@
-# Pacman index cost and host limits
+# Pacman index cost, memory and host limits
 
-Investigation and fix, 2026-10-18 · relates to `docs/rust-rewrite-plan.md` §7.2 and §9
+Investigation and redesign, 2026-10-18 · relates to `docs/rust-rewrite-plan.md`
+§7.2 and §9
 
-## Symptom
+This document records why the pacman index was reshaped, how it is stored now,
+and the measured memory/fuel cost. It supersedes the earlier revision that
+scoped the index and raised the host memory cap.
 
-Scanning a small tree (a project directory, a temporary fixture) disabled the
-bundled pacman detector after emitting ~1,400 `path ... is claimed by both ...`
-warnings:
+## Original symptom
+
+Scanning any tree disabled the bundled pacman detector after ~1,400
+`path ... is claimed by both ...` warnings:
 
 ```
 detector `pacman` disabled: init trapped: ... all fuel consumed by WebAssembly
 ```
 
-The scan itself was correct apart from the missing pacman claims, but the plugin
-was unusable on a normal Arch installation.
+The scan was correct apart from the missing pacman claims, but the plugin was
+unusable on a normal Arch installation.
+
+## The two problems
+
+1. **Unbounded, heap-string-heavy representation.** `init` parsed the whole
+   database into a `BTreeMap<String, OwnedPath>`. Every entry owned two heap
+   `String`s (`package`, `version`) plus an inline mtree entry with up to four
+   more (`link`, `md5` hex, `sha256` hex, `invalid`). For a full Arch system
+   that is ~450 MiB live, and serializing it as JSON needed another ~123 MiB
+   buffer — more than the (then 256 MiB) per-detector cap. The cap was raised to
+   512 MiB as a stopgap.
+2. **Unscoped, eager work.** `init` read every package's `files` and parsed
+   every gzipped `mtree`, even for a crawl that could never ask about `/usr`.
+   Fuel was a single 10-billion budget, but preparation legitimately needs tens
+   of billions.
+
+Scoping to the crawl root (kept from the earlier fix) removes the second
+problem for ordinary scans but not the first: a full-system scan still visits
+mostly-owned paths and needs per-path metadata.
+
+## Host used for the numbers
+
+Arch Linux, 1,695 packages in `/var/lib/pacman/local`, 520,735 `files` lines,
+**479,485 unique owned paths** (27.3 MiB of path bytes). Largest single `mtree`
+is 5 MiB uncompressed (`breeze-icons`). Bundled release component throughout.
+
+## Design: a compact, partly-lazy index
+
+Each path is keyed by a 64-bit FNV-1a hash of its absolute path. The index is
+three cache entries (schema `INDEX_FORMAT = 3`):
+
+| Entry | Contents | Size (measured) | Loaded |
+| --- | --- | ---: | --- |
+| `…:…:metadata` | header, interned package table, shared string arena (link targets, diagnostics), 64-bit-hash Bloom filter | 1.53 MiB | fully (`cache-get`) |
+| `…:…:metadata:t` | open-addressed `hash → record index` table | 7.40 MiB | fully (`cache-get`) |
+| `…:…:metadata:r` | one 52-byte record per owned path (plus, at `checksum` level, a 48-byte md5+sha256 arena) | 23.78 MiB | **one record at a time** (`cache-read`) |
+
+Total on disk ≈ 32.7 MiB, down from 123 MiB of JSON.
+
+A lookup hashes the path, rejects negatives with the Bloom filter, probes the
+in-memory table, and reads the matching record on demand. The cache key
+includes the database path, the `local/` mtime, the crawl root **and the
+check level** (a `checksum` index carries the digest arena; a `metadata` index
+does not). Different scopes, check levels or database snapshots never share an
+entry.
+
+`init` streams every `mtree` entry instead of building a map, so a package with a
+multi-megabyte mtree costs one entry of guest memory at a time. `files` is read
+first, so irrelevant packages never pay for `desc`/`mtree` parsing.
+
+### New host import: `cache-read`
+
+`cache-get` returns a whole entry, which would defeat the lazy records. The
+`host` interface therefore gains:
+
+```wit
+cache-read: func(key: string, offset: u64, len: u32) -> result<option<list<u8>>, string>;
+```
+
+`none` means the entry is missing (a miss, like `cache-get`); an empty list
+means the offset is at or past the end; a short list is a range that crosses the
+end. The host caps `len` at 1 MiB and caches the open file handle so an
+entry-by-entry scan is one `seek`+`read` per record. It is gated by the same
+`cache = true` capability. If a ranged read fails mid-scan, the plugin reloads
+the whole records entry once and continues from memory, so a host that cannot
+serve ranges degrades gracefully instead of dropping claims.
 
 ## Measurements
 
-Host used for the numbers below: Arch Linux, 1,691 packages in
-`/var/lib/pacman/local`, 520,494 lines across the package `files` databases,
-479,302 unique owned paths after deduplication. The bundled release component
-was used throughout.
+Index build (cold, fresh cache) and steady state, on the host above:
 
-| Scenario | Fuel consumed by `init` | Wall time (cold) | Result |
+| Scenario | Peak guest linear memory | `init` fuel | Result |
 | --- | ---: | ---: | --- |
-| Full index (crawl root `/`) | ~77.3 billion | 8–10 s | succeeds with the new limits |
-| `/usr/bin` (scoped) | ~32.8 billion | ~3.4 s | succeeds |
-| Project/temp root (scoped, no owned paths) | ~12 billion | ~1 s | succeeds after reading the `files` lists |
-| Any root, before the fix | >10 billion | — | traps, plugin disabled |
+| Full index, cold (`root = /`) | ~44 MiB | ~51.1 billion | succeeds |
+| Full index, warm (cache hit, records lazy) | ~12 MiB | ~0.4 billion | succeeds |
+| `/usr/bin` or a project root (scoped) | tiny | tiny | succeeds |
 
-Memory for the full index:
+The ~44 MiB cold peak is the transient build buffer (the 23.8 MiB record area
+is reserved up front so it never reallocates, plus the 7.4 MiB table and the
+meta/strings). Steady state is the ~9 MiB meta + table. Both are well under the
+50 MiB goal.
 
-| Guest memory cap | Result |
-| --- | --- |
-| 256 MiB (old default) | OOM inside `serde_json` while writing the cache |
-| 384 MiB | OOM |
-| 448 MiB | OOM |
-| 512 MiB | succeeds |
+Before the redesign a full system needed ~450 MiB and 64 MiB was not enough to
+build; now 44 MiB builds and 12 MiB reloads.
 
-The serialized full index is 128,472,003 bytes (~123 MiB). Peak live memory is
-roughly 450 MiB: the parsed index plus the JSON buffer exist at the same time.
+Reproduce (Arch only; CI has no Arch host):
 
-## Root causes
+```sh
+cargo build --release -p backupcrawl-cli
+./target/release/backupcrawl ~ --plugins pacman
+./target/release/backupcrawl /usr/bin --plugins pacman --format json
+```
 
-1. **The index was not scoped to the crawl root.** `init` read every package's
-   `files` and parsed every gzipped `mtree`, even when the scan could never ask
-   about `/usr` or `/etc`. That is the dominant cost for ordinary scans and the
-   reason the plugin was disabled for a project-tree crawl.
-2. **One fuel budget covered every call.** `fuel_per_call` was 10 billion, while
-   preparation legitimately needs ~77 billion on a full system.
-3. **The memory cap was 256 MiB.** It was an example value in the plan, not a
-   measured requirement, and the eager full-system index does not fit.
-4. **Duplicate ownership was logged per path.** Shared directories are normal
-   (`/usr`, `/usr/bin`, ... are owned by every package), so a full build emitted
-   thousands of warnings. Meta packages with an empty `files` file (`base`,
-   `base-devel`, `ca-certificates`, ...) were also reported as parse errors.
-5. **Fuel exhaustion cannot be retried.** The first attempted fix caught
-   `Trap::OutOfFuel`, refilled the budget and retried `init`. Wasmtime rejects
-   the second call with `cannot enter component instance` because the component
-   instance is still considered entered after a trap. A soft retry is therefore
-   not possible without changing the component lifecycle (new instance, replay
-   from the start), which would rebuild everything anyway.
+To re-measure the ceiling, instantiate the bundled pacman component with a
+`Limits { max_memory: N, .. }` and call `init` against `/var/lib/pacman` with
+`root = /`; the smallest `N` that succeeds is the build peak. `fuel_remaining()`
+right after `init` gives the fuel figure.
 
-## Implemented fix
+## Host limits
 
-### Pacman: scope the index
-
-- `Index` contains only paths at or below the canonical crawl root.
-- `files` is read first; `desc` and `mtree` are only parsed for packages that
-  own at least one relevant path.
-- The host cache key includes the crawl root, so different scopes do not
-  invalidate or corrupt each other. `INDEX_FORMAT` was bumped to 2.
-- Empty `files` databases are a normal empty path list.
-- Duplicate ownership is counted and logged once at debug level.
-
-### Host: separate `init` budget
-
-- `Limits::fuel_per_call` stays at 10 billion for `check_*` and `finish`, so a
-  runaway check is still cut off quickly.
-- `Limits::init_fuel` is 200 billion (about 2.5× the measured full-system
-  need), so a runaway `init` is still bounded but legitimate preparation does
-  not fail.
-- A successful `init` that uses more than half of `init_fuel` logs a warning and
-  records a note. Exceeding the ordinary per-call budget is expected for pacman
-  and is only shown at info/debug level.
-- An `OutOfFuel` trap during `init` is reported as
-  `init exhausted its <n>-fuel budget: ...` rather than a bare trap.
-- `max_memory` is 512 MiB. This is a ceiling, not a reservation; scoped indexes
-  stay far below it.
-
-## Behavior after the fix
-
-- A project-tree scan reports `plugins: git ok, pacman ok, ...` with no pacman
-  warnings.
-- `/usr/bin` indexes 5,085 path claims in ~3.4 s cold and ~0.1 s warm.
-- A full `/` scan can build the index (~77 billion fuel, ~450 MiB); it is still
-  the most expensive pacman case.
-- `--jobs N` creates one detector instance per worker. Scoped indexes are
-  cheap; a full-system index is replicated per worker that misses the host cache
-  after the first worker warms it. Treat full `/` scans with many workers as a
-  memory-heavy operation.
+`Limits::max_memory` is back to **256 MiB** (the pre-stopgap value). The pacman
+index no longer needs the 512 MiB ceiling that the eager JSON representation
+required. `Limits::init_fuel` stays at **200 billion** (≈4× the measured
+full-system need) so a runaway `init` is still bounded; `fuel_per_call` stays at
+10 billion for `check_*`/`finish`.
 
 ## Follow-ups (not done here)
 
-- The cache is still JSON: the 128 MiB serialized full index and the parsed
-  image coexist during `cache_set`, which is what pushes peak memory to ~450 MiB.
-  A compact binary format (and/or streaming the write) would lower both the peak
-  and the on-disk size.
-- The index is still eager. A lazy per-package `mtree` lookup would make
-  `init` nearly free, at the cost of more file reads during the scan.
-- Per-plugin memory/fuel budgets (rather than host-wide values) would let
-  pacman keep a larger ceiling without granting it to every detector.
+- The cold build still holds the whole record area (~24 MiB) because
+  `cache-set` writes one value. A host append/chunked-write import would let it
+  stream.
+- Per-plugin memory/fuel budgets (rather than host-wide values) would let each
+  detector keep its own ceiling.
+- A minimal-perfect-hash would shrink the 7.4 MiB table further, at the cost of
+  a more complex builder.
 
 ## Reproduction
 
@@ -124,8 +145,5 @@ cargo build --release -p backupcrawl-cli
 ./target/release/backupcrawl /usr/bin --plugins pacman --format json
 ```
 
-To measure fuel on another machine, set `Limits::init_fuel` high, instantiate
-the bundled pacman component, call `init` with the desired root and compare
-`WasmDetector::fuel_remaining()` with `init_fuel`. `cargo test` must run
-somewhere with a real pacman database; CI has no Arch host, so these numbers are
-not a regression test.
+`cargo test` must run somewhere with a real pacman database for the numbers to
+be meaningful; CI has no Arch host, so these are not regression tests.

@@ -231,6 +231,18 @@ macro_rules! bind_detector {
                     __host::cache_set(key, value).map_err($crate::HostError::new)
                 }
 
+                fn cache_read(
+                    &mut self,
+                    key: &str,
+                    offset: u64,
+                    len: u32,
+                ) -> ::core::result::Result<
+                    ::core::option::Option<::std::vec::Vec<u8>>,
+                    $crate::HostError,
+                > {
+                    __host::cache_read(key, offset, len).map_err($crate::HostError::new)
+                }
+
                 fn http(
                     &mut self,
                     request: &$crate::HttpRequest,

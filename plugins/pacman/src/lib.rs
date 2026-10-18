@@ -59,13 +59,13 @@ pub struct Pacman {
 
 impl Pacman {
     fn answer(
-        &self,
+        &mut self,
         path: &Path,
         link: Option<&LinkInfo>,
         host: &mut dyn Host,
     ) -> Result<Option<Claim>, DetectorError> {
         Ok(check::check(
-            &self.index,
+            &mut self.index,
             &self.config,
             &self.root,
             path,
@@ -79,7 +79,12 @@ impl Detector for Pacman {
     fn init(&mut self, info: &ScanInfo, host: &mut dyn Host) -> Result<(), DetectorError> {
         self.config = PacmanConfig::from_config(&info.config)?;
         self.root = check::canonical_root(&info.root);
-        self.index = db::load_index(&self.config.db_path, &check::path_string(&self.root), host)?;
+        self.index = db::load_index(
+            &self.config.db_path,
+            &check::path_string(&self.root),
+            self.config.check_level.as_str(),
+            host,
+        )?;
         host.log(
             LogLevel::Debug,
             &format!(
@@ -185,13 +190,11 @@ mod tests {
     }
 
     fn index(entries: &[(&str, OwnedPath)]) -> Index {
-        Index {
-            format: db::INDEX_FORMAT,
-            entries: entries
-                .iter()
-                .map(|(path, owned)| ((*path).to_owned(), owned.clone()))
-                .collect::<BTreeMap<_, _>>(),
-        }
+        let entries = entries
+            .iter()
+            .map(|(path, owned)| ((*path).to_owned(), owned.clone()))
+            .collect::<BTreeMap<_, _>>();
+        Index::from_entries(&entries)
     }
 
     fn reason(claim: &Claim) -> &str {
@@ -270,12 +273,19 @@ mod tests {
             )
             .unwrap();
         assert_eq!(first.index.len(), 1);
-        let (key, value) = host.cache_sets().first().expect("index cached").clone();
-        assert!(key.contains("pacman-index-v"), "{key}");
+        let writes = host.cache_sets().to_vec();
+        assert!(
+            writes.iter().any(|(key, _)| key.contains("pacman-index-v")),
+            "{writes:?}"
+        );
 
-        // A fresh instance with the same cache entry must not rebuild.
+        // A fresh instance with the same cache entries must not rebuild.
+        let mut cache = MockHost::new();
+        for (key, value) in &writes {
+            cache = cache.with_cache(key.clone(), value.clone());
+        }
         let mut second = Pacman::default();
-        let mut host = MockHost::new().with_cache(&key, value);
+        let mut host = cache;
         second
             .init(
                 &scan_info(Path::new("/"), &[("db-path", db.to_str().unwrap())]),
@@ -307,10 +317,10 @@ mod tests {
             "./usr/bin/demo type=file size=1 mode=644\n",
         );
         let mtime = std::fs::metadata(db.join("local")).unwrap().modified().ok();
-        let key = db::cache_key(&db, "/", mtime);
+        let key = db::cache_key(&db, "/", "metadata", mtime);
 
         let mut detector = Pacman::default();
-        let mut host = MockHost::new().with_cache(&key, b"not json".to_vec());
+        let mut host = MockHost::new().with_cache(&key, b"not a meta entry".to_vec());
         detector
             .init(
                 &scan_info(Path::new("/"), &[("db-path", db.to_str().unwrap())]),
@@ -319,7 +329,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(detector.index.len(), 1);
-        assert_eq!(host.cache_sets().len(), 1);
+        assert!(
+            !host.cache_sets().is_empty(),
+            "the index is rebuilt and recached"
+        );
         assert!(
             host.logs()
                 .iter()
@@ -376,14 +389,14 @@ mod tests {
     #[test]
     fn metadata_mismatches_map_to_pacman_style_reasons() {
         let path = Path::new("/pkg/file");
-        let idx = index(&[(
+        let mut idx = index(&[(
             "/pkg/file",
             owned("demo", false, file_mtree(999, 100, 0o600, 1, 2)),
         )]);
         let config = PacmanConfig::default();
         let mut host = MockHost::new().with_stat(path, file_info(1, 101_000, 0o100644, 0, 0));
 
-        let claim = check::check(&idx, &config, Path::new("/"), path, None, &mut host).unwrap();
+        let claim = check::check(&mut idx, &config, Path::new("/"), path, None, &mut host).unwrap();
         assert_eq!(claim.status, Status::Dirty);
         assert_eq!(
             reason(&claim),
@@ -397,14 +410,14 @@ mod tests {
     #[test]
     fn matching_metadata_is_clean() {
         let path = Path::new("/pkg/file");
-        let idx = index(&[(
+        let mut idx = index(&[(
             "/pkg/file",
             owned("demo", false, file_mtree(5, 100, 0o644, 0, 0)),
         )]);
         let config = PacmanConfig::default();
         let mut host = MockHost::new().with_stat(path, file_info(5, 100_500, 0o100644, 0, 0));
 
-        let claim = check::check(&idx, &config, Path::new("/"), path, None, &mut host).unwrap();
+        let claim = check::check(&mut idx, &config, Path::new("/"), path, None, &mut host).unwrap();
         assert_eq!(claim.status, Status::Clean);
         assert_eq!(reason(&claim), "");
     }
@@ -414,11 +427,11 @@ mod tests {
         let path = Path::new("/pkg/thing");
         let mut mtree = file_mtree(1, 1, 0o644, 0, 0);
         mtree.kind = Some(MtreeKind::Dir);
-        let idx = index(&[("/pkg/thing", owned("demo", false, mtree))]);
+        let mut idx = index(&[("/pkg/thing", owned("demo", false, mtree))]);
         let mut host = MockHost::new().with_stat(path, file_info(1, 1_000, 0o100644, 0, 0));
 
         let claim = check::check(
-            &idx,
+            &mut idx,
             &PacmanConfig::default(),
             Path::new("/"),
             path,
@@ -433,7 +446,7 @@ mod tests {
     #[test]
     fn missing_path_is_dirty_with_a_reason() {
         let path = Path::new("/pkg/gone");
-        let idx = index(&[(
+        let mut idx = index(&[(
             "/pkg/gone",
             owned("demo", false, file_mtree(1, 1, 0o644, 0, 0)),
         )]);
@@ -443,7 +456,7 @@ mod tests {
         );
 
         let claim = check::check(
-            &idx,
+            &mut idx,
             &PacmanConfig::default(),
             Path::new("/"),
             path,
@@ -459,7 +472,7 @@ mod tests {
     fn unowned_paths_are_not_claimed() {
         let mut host = MockHost::new();
         let claim = check::check(
-            &Index::empty(),
+            &mut Index::empty(),
             &PacmanConfig::default(),
             Path::new("/"),
             Path::new("/not/owned"),
@@ -477,11 +490,11 @@ mod tests {
             invalid: Some("unknown mtree type `fifo`".to_owned()),
             ..MtreeEntry::default()
         };
-        let idx = index(&[("/pkg/odd", owned("demo", false, mtree))]);
+        let mut idx = index(&[("/pkg/odd", owned("demo", false, mtree))]);
         let mut host = MockHost::new().with_stat(path, file_info(1, 1_000, 0o100644, 0, 0));
 
         let claim = check::check(
-            &idx,
+            &mut idx,
             &PacmanConfig::default(),
             Path::new("/"),
             path,
@@ -493,7 +506,7 @@ mod tests {
         assert!(reason(&claim).contains("Unparsable mtree entry"));
 
         // A package path with no mtree entry at all is unknown as well.
-        let idx = index(&[(
+        let mut idx = index(&[(
             "/pkg/odd",
             OwnedPath {
                 package: "demo".to_owned(),
@@ -504,7 +517,7 @@ mod tests {
         )]);
         let mut host = MockHost::new().with_stat(path, file_info(1, 1_000, 0o100644, 0, 0));
         let claim = check::check(
-            &idx,
+            &mut idx,
             &PacmanConfig::default(),
             Path::new("/"),
             path,
@@ -537,7 +550,7 @@ mod tests {
             ..MtreeEntry::default()
         };
         let key = path.to_string_lossy().into_owned();
-        let idx = index(&[(key.as_str(), owned("demo", false, mtree.clone()))]);
+        let mut idx = index(&[(key.as_str(), owned("demo", false, mtree.clone()))]);
         let info = FileInfo {
             kind: FileKind::Symlink,
             size: 6,
@@ -554,7 +567,7 @@ mod tests {
         };
         let mut host = MockHost::new().with_stat(&path, info);
         let claim = check::check(
-            &idx,
+            &mut idx,
             &PacmanConfig::default(),
             Path::new("/"),
             &path,
@@ -567,10 +580,10 @@ mod tests {
         // A live relative link that points elsewhere is a mismatch.
         std::fs::remove_file(&path).unwrap();
         symlink("elsewhere", &path).unwrap();
-        let idx = index(&[(key.as_str(), owned("demo", false, mtree))]);
+        let mut idx = index(&[(key.as_str(), owned("demo", false, mtree))]);
         let mut host = MockHost::new().with_stat(&path, info);
         let claim = check::check(
-            &idx,
+            &mut idx,
             &PacmanConfig::default(),
             Path::new("/"),
             &path,
@@ -608,10 +621,10 @@ mod tests {
             target: PathBuf::from("/usr/lib/libfoo.so.1"),
             dangling: false,
         };
-        let idx = index(&[("/pkg/link", owned("demo", false, mtree.clone()))]);
+        let mut idx = index(&[("/pkg/link", owned("demo", false, mtree.clone()))]);
         let mut host = MockHost::new().with_stat(path, info);
         let claim = check::check(
-            &idx,
+            &mut idx,
             &PacmanConfig::default(),
             Path::new("/"),
             path,
@@ -622,10 +635,10 @@ mod tests {
         assert_eq!(claim.status, Status::Clean);
 
         mtree.link = Some("/usr/lib/libbar.so.1".to_owned());
-        let idx = index(&[("/pkg/link", owned("demo", false, mtree))]);
+        let mut idx = index(&[("/pkg/link", owned("demo", false, mtree))]);
         let mut host = MockHost::new().with_stat(path, info);
         let claim = check::check(
-            &idx,
+            &mut idx,
             &PacmanConfig::default(),
             Path::new("/"),
             path,
@@ -640,14 +653,14 @@ mod tests {
     #[test]
     fn backup_paths_are_flagged_but_checked_normally() {
         let path = Path::new("/etc/demo.conf");
-        let idx = index(&[(
+        let mut idx = index(&[(
             "/etc/demo.conf",
             owned("demo", true, file_mtree(5, 100, 0o644, 0, 0)),
         )]);
         let mut host = MockHost::new().with_stat(path, file_info(4, 100_000, 0o100644, 0, 0));
 
         let claim = check::check(
-            &idx,
+            &mut idx,
             &PacmanConfig::default(),
             Path::new("/"),
             path,
@@ -671,7 +684,7 @@ mod tests {
         mtree.sha256 =
             Some("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".to_owned());
         let key = path.to_string_lossy().into_owned();
-        let idx = index(&[(key.as_str(), owned("demo", false, mtree.clone()))]);
+        let mut idx = index(&[(key.as_str(), owned("demo", false, mtree.clone()))]);
         let config = PacmanConfig {
             check_level: crate::config::CheckLevel::Checksum,
             ..PacmanConfig::default()
@@ -679,13 +692,15 @@ mod tests {
         let info = file_info(5, 100_000, 0o100644, 0, 0);
 
         let mut host = MockHost::new().with_stat(&path, info);
-        let claim = check::check(&idx, &config, Path::new("/"), &path, None, &mut host).unwrap();
+        let claim =
+            check::check(&mut idx, &config, Path::new("/"), &path, None, &mut host).unwrap();
         assert_eq!(claim.status, Status::Clean);
 
         // Same size and metadata, different content: only the digest notices.
         std::fs::write(&path, b"world").unwrap();
         let mut host = MockHost::new().with_stat(&path, info);
-        let claim = check::check(&idx, &config, Path::new("/"), &path, None, &mut host).unwrap();
+        let claim =
+            check::check(&mut idx, &config, Path::new("/"), &path, None, &mut host).unwrap();
         assert_eq!(claim.status, Status::Dirty);
         assert_eq!(
             reason(&claim),
@@ -695,9 +710,10 @@ mod tests {
         // Missing digests at checksum level must not be reported clean.
         mtree.md5 = None;
         mtree.sha256 = None;
-        let idx = index(&[(key.as_str(), owned("demo", false, mtree))]);
+        let mut idx = index(&[(key.as_str(), owned("demo", false, mtree))]);
         let mut host = MockHost::new().with_stat(&path, info);
-        let claim = check::check(&idx, &config, Path::new("/"), &path, None, &mut host).unwrap();
+        let claim =
+            check::check(&mut idx, &config, Path::new("/"), &path, None, &mut host).unwrap();
         assert_eq!(claim.status, Status::Unknown);
         assert_eq!(reason(&claim), "No checksum in mtree");
     }
@@ -710,11 +726,11 @@ mod tests {
         let mut mtree = file_mtree(5, 100, 0o644, 0, 0);
         mtree.sha256 = Some("0".repeat(64));
         let key = path.to_string_lossy().into_owned();
-        let idx = index(&[(key.as_str(), owned("demo", false, mtree))]);
+        let mut idx = index(&[(key.as_str(), owned("demo", false, mtree))]);
         let mut host = MockHost::new().with_stat(&path, file_info(5, 100_000, 0o100644, 0, 0));
 
         let claim = check::check(
-            &idx,
+            &mut idx,
             &PacmanConfig::default(),
             Path::new("/"),
             &path,

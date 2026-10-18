@@ -179,23 +179,6 @@ impl Fixture {
         path
     }
 
-    fn dir(&mut self, rel: &str) -> PathBuf {
-        let path = self.root.join(rel);
-        fs::create_dir_all(&path).unwrap();
-        let meta = fs::metadata(&path).unwrap();
-        self.entry(
-            &path,
-            &format!(
-                "type=dir time={} mode={:o} uid={} gid={}",
-                mtime_seconds(&meta),
-                meta.mode() & 0o7777,
-                meta.uid(),
-                meta.gid(),
-            ),
-        );
-        path
-    }
-
     fn symlink(&mut self, rel: &str, target: &str) -> PathBuf {
         let path = self.root.join(rel);
         if let Some(parent) = path.parent() {
@@ -353,8 +336,10 @@ fn deleted_file_is_dirty_not_unclaimed() {
 #[test]
 fn type_change_is_dirty() {
     let mut fx = Fixture::new();
-    // The database expects a file; the live object is a directory.
-    let path = fx.dir("usr/lib/thing");
+    // The database expects a file; the live object is a directory. Register
+    // only the `type=file` entry (a real mtree never lists a path twice).
+    let path = fx.root().join("usr/lib/thing");
+    fs::create_dir_all(&path).unwrap();
     fx.entry(&path, "type=file size=1 time=1 mode=644");
     fx.write_db();
 
