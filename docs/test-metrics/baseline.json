@@ -380,23 +380,23 @@
       },
       {
         "path": "crates/backupcrawl-host/tests/fixtures/test-detector.wasm",
-        "bytes": 139379
+        "bytes": 116654
       },
       {
         "path": "plugins/chezmoi/dist/chezmoi.wasm",
-        "bytes": 485938
+        "bytes": 407050
       },
       {
         "path": "plugins/git/dist/git.wasm",
-        "bytes": 3386440
+        "bytes": 2810754
       },
       {
         "path": "plugins/pacman/dist/pacman.wasm",
-        "bytes": 423245
+        "bytes": 366799
       },
       {
         "path": "plugins/syncthing/dist/syncthing.wasm",
-        "bytes": 274908
+        "bytes": 233369
       }
     ]
   }

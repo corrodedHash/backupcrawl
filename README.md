@@ -30,8 +30,8 @@ WebAssembly bytes and the committed plugin components must stay byte-reproducibl
 (see the note in `scripts/wasm-build-env.sh`); use `cargo build --release` when
 regenerating those artifacts.
 
-The git, pacman, chezmoi and syncthing detectors are embedded in the binary, so
-no plugin directory is required. The chezmoi detector runs the `chezmoi` binary
+The git, pacman, chezmoi and syncthing detectors are embedded in the binary
+(zstd-compressed, decompressed lazily), so no plugin directory is required. The chezmoi detector runs the `chezmoi` binary
 (the one bundled detector that uses `exec`); when it is missing, that plugin is
 disabled with a visible note and the scan continues. The syncthing detector
 needs the local daemon for state; without it the folder is reported `unknown`

@@ -49,5 +49,10 @@ wasm_build_env() {
     # A single release codegen unit keeps symbol names from depending on the
     # checkout/target path (see build-test-components.sh).
     export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+    # Strip the wasm `name` custom section. It is 13-17% of each component and
+    # is only useful for symbolizing traps, which the host no longer does (the
+    # `backtrace`/`demangle` wasmtime features are disabled). Applying it here
+    # keeps the committed artifacts reproducible across machines.
+    export CARGO_PROFILE_RELEASE_STRIP=symbols
     export BACKUPCRAWL_WASM_BUILD_ENV=1
 }

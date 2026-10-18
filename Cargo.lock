@@ -207,6 +207,7 @@ dependencies = [
  "url",
  "wasmtime",
  "wasmtime-wasi",
+ "zstd",
 ]
 
 [[package]]
