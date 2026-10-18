@@ -13,6 +13,21 @@ members = [
     "plugins/chezmoi",
     "plugins/syncthing",
 ]
+# The wasm-only component crates (`crates/test-components`,
+# `crates/backupcrawl-plugin-sdk/example-plugin` and `plugins/*`) are excluded
+# from the default build/test set: they are `cdylib`s whose wit-bindgen export
+# names (`backupcrawl:detector/...#check-dir`) are not valid in a native linker
+# version script, so a native `cargo build` of one fails to link. They are built
+# for wasm32-wasip1/wasip2 by the build scripts instead. `cargo test --workspace`
+# and `cargo clippy --workspace --all-targets` still cover them, and CI uses
+# `--workspace` (a test harness is not a cdylib, so it links fine).
+default-members = [
+    "crates/backupcrawl-core",
+    "crates/backupcrawl-cli",
+    "crates/backupcrawl-wit",
+    "crates/backupcrawl-host",
+    "crates/backupcrawl-plugin-sdk",
+]
 # The gix feasibility spike (M1.7) is a standalone workspace with its own lockfile
 # and a wasm component crate; keep it out of the main workspace. `vendor/` holds
 # the `[patch.crates-io]` shims used to build gix for wasm32-wasip2 (M1.8).
@@ -113,13 +128,11 @@ filetime = { path = "vendor/filetime" }
 # Distribution build for the `backupcrawl` CLI: stripped symbols, fat LTO and
 # `panic = "abort"` (which also drops the unwind/exception tables).
 #
-# This is deliberately *not* the `release` profile. `release` must stay at its
-# defaults because the plugin pipeline builds the committed WebAssembly
-# components with it (`cargo component build --release`), and `strip`, `lto` and
-# `panic` all change the emitted `.wasm` bytes — which would break the CI
-# "rebuild and `git diff --exit-code`" staleness checks (see
-# `scripts/wasm-build-env.sh`). Keeping the size settings in a profile that only
-# the native CLI uses leaves those artifacts byte-reproducible.
+# This is deliberately *not* the `release` profile: `release` stays at its
+# defaults so the everyday build/test cycle is fast (fat LTO dominates the link
+# time). The WebAssembly detectors are always compiled with `release` by
+# `scripts/build-components.sh`, independent of the outer profile, so the two
+# profiles no longer need to be byte-compatible.
 #
 # Build with: cargo build --profile dist -p backupcrawl-cli
 [profile.dist]

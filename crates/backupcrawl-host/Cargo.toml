@@ -25,8 +25,8 @@ wasmtime-wasi.workspace = true
 zstd.workspace = true
 
 [build-dependencies]
-# Compresses the committed `plugins/*/dist/*.wasm` artifacts into `OUT_DIR` at
-# build time (see `build.rs` and `src/bundled.rs`).
+# Compresses the build-time `plugins/*/dist/*.wasm` components into `OUT_DIR`
+# (see `build.rs` and `src/bundled.rs`).
 zstd.workspace = true
 
 [dev-dependencies]

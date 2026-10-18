@@ -7,13 +7,13 @@
 //!
 //! # Status
 //!
-//! The registry is filled by M1.8 with the git detector, by M2.1 with the
-//! pacman detector, by M3.1 with the chezmoi detector and by M3.2 with the
-//! syncthing detector. `plugins/git`, `plugins/pacman`, `plugins/chezmoi` and
-//! `plugins/syncthing` are built with `cargo component build --target
-//! wasm32-wasip2 --release` (see the matching `scripts/build-*-plugin.sh`), the
-//! component is copied to `<plugin>/dist/<name>.wasm` and its manifest to
-//! `<plugin>/dist/plugin.toml`, and all are embedded below.
+//! The registry holds the git detector (M1.8), the pacman detector (M2.1), the
+//! chezmoi detector (M3.1) and the syncthing detector (M3.2). `plugins/git`,
+//! `plugins/pacman`, `plugins/chezmoi` and `plugins/syncthing` are built with
+//! `cargo component build --target wasm32-wasip2 --release` by
+//! `scripts/build-components.sh`; the component is written to
+//! `<plugin>/dist/<name>.wasm` (gitignored) while its manifest stays committed
+//! as `<plugin>/dist/plugin.toml`, and all are embedded below.
 //!
 //! `include_bytes!` paths are relative to this source file
 //! (`crates/backupcrawl-host/src/bundled.rs`), so `../../../plugins/...`
@@ -21,12 +21,11 @@
 //!
 //! # Compression
 //!
-//! The wasm components are embedded zstd-compressed: [`build.rs`][build] writes
-//! `OUT_DIR/<name>.wasm.zst` from the committed `plugins/*/dist/*.wasm`
-//! artifacts, and [`BundledPlugin::wasm`] decompresses on first use. That keeps
-//! the committed `.wasm` files as the reproducible source of truth while cutting
-//! ~3 MB of embedded data. zstd is already linked through wasmtime's compilation
-//! cache, so the runtime side adds no new dependency.
+//! The wasm components are embedded zstd-compressed: [`build.rs`][build] first
+//! builds `plugins/*/dist/*.wasm` from source, then writes
+//! `OUT_DIR/<name>.wasm.zst`, and [`BundledPlugin::wasm`] decompresses on first
+//! use. That cuts ~3 MB of embedded data; zstd is already linked through
+//! wasmtime's compilation cache, so the runtime side adds no new dependency.
 //!
 //! [build]: https://doc.rust-lang.org/cargo/reference/build-scripts.html
 
