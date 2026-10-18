@@ -65,8 +65,30 @@ thiserror = "2"
 toml = "0.8"
 toml_edit = "0.25"
 url = "2"
-wasmtime = "49.0"
-wasmtime-wasi = "49.0"
+# wasmtime with only the surface the detector host uses. The defaults drag in
+# the whole CLI/tooling feature set, none of which is reachable from
+# `crates/backupcrawl-host`: WAT text parsing (`wat`), the GC proposals
+# (`gc`, `gc-copying`, `gc-drc`, `gc-null`), `coredump`, the debug/profiling
+# hooks (`debug`, `debug-builtins`, `profiling`), the pooling allocator, parallel
+# compilation, wasm backtrace symbolization (`addr2line`, `backtrace`,
+# `demangle`), runtime WIT parsing (`wit-parser`) and the async component model
+# (`component-model-async`, `component-model-bytes`, `stack-switching`). `async`
+# is kept because `wasmtime-wasi`'s `p2` feature unconditionally requires it,
+# even though the host links the sync variant. `cranelift` still pulls in the
+# `pulley` interpreter (wasmtime wires that feature in itself), which is not
+# removable from here.
+wasmtime = { version = "49.0", default-features = false, features = [
+    "anyhow",
+    "async",
+    "cache",
+    "component-model",
+    "cranelift",
+    "runtime",
+    "std",
+] }
+# `p2` is the WASI preview2 surface the detectors import; `p1` (wiggle) and `p3`
+# (the async component model) are unused.
+wasmtime-wasi = { version = "49.0", default-features = false, features = ["p2"] }
 # wit-bindgen is pinned to the version cargo-component 0.21.1 generates its
 # bindings with (wit-bindgen-rust 0.41.0).
 wit-bindgen = "0.41"
@@ -81,3 +103,22 @@ wit-parser = "0.258"
 [patch.crates-io]
 memmap2 = { path = "vendor/memmap2-shim" }
 filetime = { path = "vendor/filetime" }
+
+# Distribution build for the `backupcrawl` CLI: stripped symbols, fat LTO and
+# `panic = "abort"` (which also drops the unwind/exception tables).
+#
+# This is deliberately *not* the `release` profile. `release` must stay at its
+# defaults because the plugin pipeline builds the committed WebAssembly
+# components with it (`cargo component build --release`), and `strip`, `lto` and
+# `panic` all change the emitted `.wasm` bytes — which would break the CI
+# "rebuild and `git diff --exit-code`" staleness checks (see
+# `scripts/wasm-build-env.sh`). Keeping the size settings in a profile that only
+# the native CLI uses leaves those artifacts byte-reproducible.
+#
+# Build with: cargo build --profile dist -p backupcrawl-cli
+[profile.dist]
+inherits = "release"
+strip = "symbols"
+lto = "fat"
+codegen-units = 1
+panic = "abort"

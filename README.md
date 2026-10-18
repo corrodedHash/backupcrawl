@@ -19,15 +19,23 @@ read [`docs/plugin-authoring.md`](docs/plugin-authoring.md).
 
 ## Build
 
-    cargo build --release
+    cargo build --profile dist -p backupcrawl-cli
 
-The binary ends up at `target/release/backupcrawl`. The git, pacman, chezmoi and
-syncthing detectors are embedded in the binary, so no plugin directory is
-required. The chezmoi detector runs the `chezmoi` binary (the one bundled
-detector that uses `exec`); when it is missing, that plugin is disabled with a
-visible note and the scan continues. The syncthing detector needs the local
-daemon for state; without it the folder is reported `unknown` (unless
-`assume-marker-only` is set).
+The distribution binary ends up at `target/dist/backupcrawl`. The `dist` profile
+(inherits `release`) adds `strip`, fat LTO, `codegen-units = 1` and
+`panic = "abort"`, which roughly halves the size versus a plain
+`cargo build --release` (the Wasm runtime dominates the binary). That profile is
+kept separate from `release` because `strip`/`lto`/`panic` change the emitted
+WebAssembly bytes and the committed plugin components must stay byte-reproducible
+(see the note in `scripts/wasm-build-env.sh`); use `cargo build --release` when
+regenerating those artifacts.
+
+The git, pacman, chezmoi and syncthing detectors are embedded in the binary, so
+no plugin directory is required. The chezmoi detector runs the `chezmoi` binary
+(the one bundled detector that uses `exec`); when it is missing, that plugin is
+disabled with a visible note and the scan continues. The syncthing detector
+needs the local daemon for state; without it the folder is reported `unknown`
+(unless `assume-marker-only` is set).
 
 ## Tests
 
