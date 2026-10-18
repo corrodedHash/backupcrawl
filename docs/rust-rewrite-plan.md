@@ -560,6 +560,9 @@ Capabilities: `fs-read = ["/"]` (package files live system-wide; authoritative s
 Config: `db-path`, `check-level = "metadata" | "checksum"`, `backend = "native" | "pacman"`,
 `timeout-ms`.
 
+Measured index cost, memory requirements and the scoping fix are recorded in
+[`pacman-index-and-limits.md`](pacman-index-and-limits.md).
+
 ### 7.3 syncthing
 
 Managed detection:
@@ -764,7 +767,8 @@ third-party plugins exist. See open question 4.
   (pacman's full-system index needs ~77 billion fuel), exec timeout + output caps (e.g. 64 MiB),
   HTTP timeout + size cap. Fuel exhaustion in `init` cannot be retried (wasmtime refuses to
   re-enter a component after a trap), so `init` gets the larger ceiling and logs a warning when
-  it approaches it.
+  it approaches it. Measurements and the scoping decision are in
+  [`pacman-index-and-limits.md`](pacman-index-and-limits.md).
 - Compiled components are cached in two layers: in-memory (keyed by the wasm bytes, one
   compilation per detector per process) and on disk via wasmtime's component cache
   (`$XDG_CACHE_HOME/backupcrawl/plugins/_components`). The bundled git component takes ~10 s
