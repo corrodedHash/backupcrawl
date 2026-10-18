@@ -24,11 +24,31 @@ read [`docs/plugin-authoring.md`](docs/plugin-authoring.md).
 The distribution binary ends up at `target/dist/backupcrawl`. The `dist` profile
 (inherits `release`) adds `strip`, fat LTO, `codegen-units = 1` and
 `panic = "abort"`, which roughly halves the size versus a plain
-`cargo build --release` (the Wasm runtime dominates the binary). That profile is
-kept separate from `release` because `strip`/`lto`/`panic` change the emitted
-WebAssembly bytes and the committed plugin components must stay byte-reproducible
-(see the note in `scripts/wasm-build-env.sh`); use `cargo build --release` when
-regenerating those artifacts.
+`cargo build --release` (the Wasm runtime dominates the binary).
+
+### Prerequisite: `cargo-component`
+
+The four bundled detectors are WebAssembly components and are **not committed**.
+`crates/backupcrawl-host/build.rs` builds them with `cargo component build` as
+part of the normal build (writing the gitignored `plugins/*/dist/*.wasm`) and
+then zstd-compresses them into the binary, so every build needs
+
+    cargo install cargo-component --version 0.21.1 --locked
+
+plus the `wasm32-wasip1`/`wasm32-wasip2` targets (already pinned in
+`rust-toolchain.toml`); make sure `$CARGO_HOME/bin` (usually `~/.cargo/bin`) is
+on `PATH`. The nested component build uses its own target directory
+(`target/wasm-components`) so it never contends with the outer build's
+target-dir lock; `BACKUPCRAWL_COMPONENT_TARGET_DIR` overrides it. The same
+applies to `cargo test` and `cargo clippy`; packagers that ship prebuilt
+components can set `BACKUPCRAWL_SKIP_COMPONENT_BUILD=1` to reuse them without the
+toolchain.
+
+The first build compiles the components (a few minutes); later builds reuse the
+cached objects until a plugin source changes. Because the components are no
+longer committed and the manifests/`wit` live outside the host crate,
+`cargo install backupcrawl` from a published crate is not supported — install
+from the git checkout instead.
 
 The git, pacman, chezmoi and syncthing detectors are embedded in the binary
 (zstd-compressed, decompressed lazily), so no plugin directory is required. The chezmoi detector runs the `chezmoi` binary
