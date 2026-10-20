@@ -22,6 +22,12 @@ toml_edit.workspace = true
 url.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
+zstd.workspace = true
+
+[build-dependencies]
+# Compresses the build-time `plugins/*/dist/*.wasm` components into `OUT_DIR`
+# (see `build.rs` and `src/bundled.rs`).
+zstd.workspace = true
 
 [dev-dependencies]
 flate2.workspace = true

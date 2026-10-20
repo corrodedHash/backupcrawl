@@ -22,7 +22,7 @@ wasm_build_env "$root"
 
 fixture_dir="crates/backupcrawl-cli/tests/fixtures/detectors/dotbak"
 
-# The committed fixture is the release component; default to it so a bare
+# The generated fixture is the release component; default to it so a bare
 # invocation cannot silently overwrite it with a much larger debug blob.
 build_args=("$@")
 profile="debug"

@@ -61,7 +61,7 @@ fn instantiate() -> WasmDetector {
         .expect("chezmoi must be in the bundled registry");
     let policy = CapabilityPolicy::from_manifest(&manifest());
     runtime()
-        .instantiate(plugin.wasm, PLUGIN, policy)
+        .instantiate(plugin.wasm(), PLUGIN, policy)
         .expect("instantiate chezmoi component")
 }
 

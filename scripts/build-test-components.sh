@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Build the fixture detector component and refresh the checked-in artifact.
+# Build the host smoke-test fixture component.
 #
 # The host smoke test loads `crates/backupcrawl-host/tests/fixtures/test-detector.wasm`,
-# which is committed so `cargo test` works without the wasm toolchain. Run this
-# script after changing `crates/test-components` (or the WIT contract) and
-# commit the refreshed artifact; CI fails if it is stale.
+# which is now generated (gitignored) rather than committed. This script is
+# called by `scripts/build-components.sh` (from
+# `crates/backupcrawl-host/build.rs`) so `cargo test` builds it as needed; run it
+# by hand after changing `crates/test-components` or the WIT contract.
 #
 # Requires `cargo component` (0.21.1) and the toolchain from rust-toolchain.toml.
 # Honors CARGO_TARGET_DIR; never writes into the source tree's `target/`.

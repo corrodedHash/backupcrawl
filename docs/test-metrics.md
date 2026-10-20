@@ -28,7 +28,7 @@ It also records:
   `pacman_plugin`, `chezmoi_plugin`, `syncthing_plugin`) with a fresh `TMPDIR`,
   measuring the one-time wasmtime JIT compile of each component (the git/gix
   component alone is ~9 s);
-* the **size of the target directory** and every committed `.wasm` artifact.
+* the **size of the target directory** and every generated `.wasm` artifact.
 
 Peak RSS is a maximum, not a sum, for the same reason `getrusage` reports a
 maximum: concurrent test threads share the process tree. The suite wall/CPU/IO

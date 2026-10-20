@@ -379,7 +379,7 @@ fn scan_bundled(outcome: &mut DiscoveryOutcome, seen: &mut BTreeMap<String, usiz
             manifest,
             manifest_path: None,
             wasm_path: None,
-            wasm_bytes: entry.wasm.to_vec(),
+            wasm_bytes: entry.wasm().to_vec(),
             source: PluginSource::Bundled,
             source_dir: None,
             warnings,

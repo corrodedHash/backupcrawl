@@ -289,24 +289,45 @@ $ cargo component build -p backupcrawl-plugin-mine --release
 
 The component lands under
 `<CARGO_TARGET_DIR>/<triple>/<profile>/<crate_name>.wasm` (default triple
-`wasm32-wasip1`; pass `--target wasm32-wasip2` for the wasip2 target). The two
+`wasm32-wasip1`; pass `--target wasm32-wasip2` for the wasip2 target). The build
 scripts are the working reference:
 
+- `scripts/build-components.sh` — the four bundled detectors
+  (`--target wasm32-wasip2`) plus the host smoke-test fixture; run automatically
+  by `crates/backupcrawl-host/build.rs`.
 - `scripts/build-example-plugin.sh` — SDK example, default target.
-- `scripts/build-git-plugin.sh` — bundled git detector, `--target wasm32-wasip2`,
-  reproducible with `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1`.
+- `scripts/build-cli-fixture-plugin.sh` — the `dotbak` CLI test fixture (built
+  from the SDK example); run automatically by `crates/backupcrawl-cli/build.rs`.
+- `scripts/build-git-plugin.sh` — bundled git detector, `--target wasm32-wasip2`.
 - `scripts/build-pacman-plugin.sh` — bundled pacman detector, same pattern.
 - `scripts/build-chezmoi-plugin.sh` — bundled chezmoi detector, same pattern.
 - `scripts/build-syncthing-plugin.sh` — bundled syncthing detector, same
   pattern; its golden tests run the component against a local fake REST daemon.
 
-> Reproducibility: the committed fixture artifacts are part of the repo and CI
-> fails if they are stale. Build the bundled detectors through their scripts:
-> they source `scripts/wasm-build-env.sh`, which applies a single release codegen
-> unit and remaps the machine-specific `CARGO_HOME`, `RUSTUP_HOME`, checkout and
-> target prefixes to stable placeholders. rustc otherwise embeds absolute paths
-> in panic locations, so the same source would produce different bytes on a
-> different machine and the CI staleness check would fail.
+`cargo-component` 0.21.1 plus the `wasm32-wasip1`/`wasm32-wasip2` targets
+(`rust-toolchain.toml`) are a prerequisite for any build of this workspace: the
+bundled detectors and the test fixtures are **not committed**, so
+`cargo build`/`cargo test`/`cargo clippy` compile them on demand through the
+build scripts above (into the gitignored `plugins/*/dist/*.wasm` and
+`crates/*/tests/fixtures/**`). Install it with
+
+```console
+$ cargo install cargo-component --version 0.21.1 --locked
+```
+
+and keep `$CARGO_HOME/bin` (usually `~/.cargo/bin`) on `PATH`. The nested build
+uses `target/wasm-components` as its own target directory so it cannot deadlock
+on the outer build's target-dir lock; `BACKUPCRAWL_COMPONENT_TARGET_DIR`
+overrides it and `BACKUPCRAWL_SKIP_COMPONENT_BUILD=1` reuses prebuilt components
+without the toolchain.
+
+> Reproducibility: the components are still built through
+> `scripts/wasm-build-env.sh`, which applies a single release codegen unit and
+> remaps the machine-specific `CARGO_HOME`, `RUSTUP_HOME`, checkout and target
+> prefixes to stable placeholders. That keeps the shared component target cache
+> (`target/wasm-components`) stable across checkouts. Because the artifacts are
+> no longer committed, byte-for-byte equality across machines is no longer
+> required.
 
 ## Installing, discovery and trust
 

@@ -56,7 +56,7 @@ fn detector(fixture: &Fixture, origin: &str) -> WasmDetector {
     let policy = CapabilityPolicy::from_manifest(&manifest).with_http([format!("http://{origin}")]);
     let grants = FsGrants::from_roots([fixture._dir.path()]);
     let mut detector = runtime()
-        .instantiate_with_fs(plugin().wasm, "syncthing", policy, &grants)
+        .instantiate_with_fs(plugin().wasm(), "syncthing", policy, &grants)
         .expect("instantiate syncthing component");
     detector
         .init(&ScanInfo {
