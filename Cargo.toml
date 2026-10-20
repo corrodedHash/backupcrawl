@@ -84,20 +84,23 @@ url = "2"
 # the whole CLI/tooling feature set, none of which is reachable from
 # `crates/backupcrawl-host`: WAT text parsing (`wat`), the GC proposals
 # (`gc`, `gc-copying`, `gc-drc`, `gc-null`), `coredump`, the debug/profiling
-# hooks (`debug`, `debug-builtins`, `profiling`), the pooling allocator, parallel
-# compilation, wasm backtrace symbolization (`addr2line`, `backtrace`,
-# `demangle`), runtime WIT parsing (`wit-parser`) and the async component model
+# hooks (`debug`, `debug-builtins`, `profiling`), the pooling allocator, wasm
+# backtrace symbolization (`addr2line`, `backtrace`, `demangle`), runtime WIT
+# parsing (`wit-parser`) and the async component model
 # (`component-model-async`, `component-model-bytes`, `stack-switching`). `async`
 # is kept because `wasmtime-wasi`'s `p2` feature unconditionally requires it,
-# even though the host links the sync variant. `cranelift` still pulls in the
-# `pulley` interpreter (wasmtime wires that feature in itself), which is not
-# removable from here.
+# even though the host links the sync variant. `parallel-compilation` is kept
+# because the bundled git component takes ~28 s to JIT-compile without it and
+# ~4 s with it; the first-run latency matters more than the small binary-size
+# saving. `cranelift` still pulls in the `pulley` interpreter (wasmtime wires
+# that feature in itself), which is not removable from here.
 wasmtime = { version = "49.0", default-features = false, features = [
     "anyhow",
     "async",
     "cache",
     "component-model",
     "cranelift",
+    "parallel-compilation",
     "runtime",
     "std",
 ] }
