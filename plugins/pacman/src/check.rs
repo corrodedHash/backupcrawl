@@ -32,7 +32,7 @@ use crate::db::{Index, MtreeKind, OwnedPath, lexical_normalize};
 /// consulted when the guest cannot read the raw link target itself (see
 /// [`compare_link`]).
 pub fn check(
-    index: &Index,
+    index: &mut Index,
     config: &PacmanConfig,
     root: &Path,
     path: &Path,
@@ -40,21 +40,21 @@ pub fn check(
     host: &mut dyn Host,
 ) -> Option<Claim> {
     let key = lookup_key(root, path);
-    let owned = index.entries.get(&key)?;
+    let owned = index.lookup(&key, host)?;
 
     let mut reasons = Vec::new();
     let mut unknown = Vec::new();
 
     let Some(mtree) = &owned.mtree else {
         return Some(claim(
-            owned,
+            &owned,
             Status::Unknown,
             &["No mtree entry for path".to_owned()],
         ));
     };
     if let Some(invalid) = &mtree.invalid {
         return Some(claim(
-            owned,
+            &owned,
             Status::Unknown,
             &[format!("Unparsable mtree entry: {invalid}")],
         ));
@@ -69,21 +69,21 @@ pub fn check(
             } else {
                 format!("Cannot stat path: {message}")
             };
-            return Some(claim(owned, Status::Dirty, &[reason]));
+            return Some(claim(&owned, Status::Dirty, &[reason]));
         }
     };
 
     let live = live_kind(&info);
     let Some(expected_db) = mtree.kind else {
         return Some(claim(
-            owned,
+            &owned,
             Status::Unknown,
             &["Mtree entry has no usable type".to_owned()],
         ));
     };
     if live != expected_db {
         return Some(claim(
-            owned,
+            &owned,
             Status::Dirty,
             &["File type mismatch".to_owned()],
         ));
@@ -150,7 +150,7 @@ pub fn check(
     } else {
         (Status::Clean, Vec::new())
     };
-    Some(claim(owned, status, &messages))
+    Some(claim(&owned, status, &messages))
 }
 
 /// Looks up `path` as an absolute, lexically normalized database key.
@@ -204,7 +204,7 @@ fn compare_link(
     }
 }
 
-fn path_string(path: &Path) -> String {
+pub(crate) fn path_string(path: &Path) -> String {
     let text = path.to_string_lossy();
     let trimmed = text.trim_end_matches('/');
     if trimmed.is_empty() {

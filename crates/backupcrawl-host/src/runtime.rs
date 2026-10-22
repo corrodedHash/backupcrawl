@@ -373,6 +373,19 @@ impl WasmDetector {
         self.store.data().cache_dir()
     }
 
+    /// Remaining fuel in the guest store.
+    ///
+    /// The budget is refilled before every call, so the value is only
+    /// meaningful right after a call returned: it is how much of that call's
+    /// budget ([`Limits::init_fuel`] for `init`, [`Limits::fuel_per_call`]
+    /// otherwise) it left unused. Exposed for diagnostics and tests that
+    /// calibrate the default budget.
+    pub fn fuel_remaining(&self) -> Result<u64, DetectorError> {
+        self.store
+            .get_fuel()
+            .map_err(|err| DetectorError::Host(format!("reading the guest fuel: {err:#}")))
+    }
+
     /// Calls the guest `init` exactly once.
     pub fn init(&mut self, info: &ScanInfo) -> Result<(), DetectorError> {
         if self.initialized {
@@ -395,10 +408,43 @@ impl WasmDetector {
                 .collect(),
         };
 
-        self.refill()?;
-        self.call_count += 1;
+        self.refill_with(self.limits.init_fuel)?;
+        // Fuel is a runaway guard, not a cap on expected work, so `init` gets
+        // its own (larger) budget. Exceeding the ordinary per-call budget is
+        // normal for system-wide detectors; warn only when init gets close to
+        // its own ceiling.
         let detector = self.detector();
-        match detector.call_init(&mut self.store, &wit_info) {
+        let outcome = detector.call_init(&mut self.store, &wit_info);
+        self.call_count += 1;
+        if outcome.is_ok()
+            && let Ok(remaining) = self.store.get_fuel()
+        {
+            let consumed = self.limits.init_fuel.saturating_sub(remaining);
+            // Exceeding the per-call budget during `init` is expected for
+            // system-wide detectors (pacman reads every package's file list).
+            // Only approach to the init ceiling is worth a warning; the rest is
+            // useful detail for `-v` / the run report.
+            if consumed > self.limits.init_fuel / 2 {
+                log::warn!(
+                    "detector `{}`: init used {} of its {}-fuel budget",
+                    self.name,
+                    consumed,
+                    self.limits.init_fuel
+                );
+                self.notes.push(format!(
+                    "init used {consumed} of {} fuel",
+                    self.limits.init_fuel
+                ));
+            } else if consumed > self.limits.fuel_per_call {
+                log::info!(
+                    "detector `{}`: init used {} fuel (per-call budget {})",
+                    self.name,
+                    consumed,
+                    self.limits.fuel_per_call
+                );
+            }
+        }
+        match outcome {
             Ok(Ok(())) => {
                 self.initialized = true;
                 Ok(())
@@ -412,7 +458,14 @@ impl WasmDetector {
                 })
             }
             Err(trap) => {
-                let reason = format!("init trapped: {trap:#}");
+                let reason = if is_out_of_fuel(&trap) {
+                    format!(
+                        "init exhausted its {}-fuel budget: {trap:#}",
+                        self.limits.init_fuel
+                    )
+                } else {
+                    format!("init trapped: {trap:#}")
+                };
                 self.disable(reason.clone());
                 Err(DetectorError::Disabled {
                     name: self.name.clone(),
@@ -513,11 +566,14 @@ impl WasmDetector {
 
     /// Refills the per-call fuel budget and re-arms the epoch deadline.
     fn refill(&mut self) -> Result<(), DetectorError> {
-        self.store
-            .set_fuel(self.limits.fuel_per_call)
-            .map_err(|err| {
-                DetectorError::Host(format!("arming the detector fuel budget: {err:#}"))
-            })?;
+        self.refill_with(self.limits.fuel_per_call)
+    }
+
+    /// Refills the guest fuel to `fuel` and re-arms the epoch deadline.
+    fn refill_with(&mut self, fuel: u64) -> Result<(), DetectorError> {
+        self.store.set_fuel(fuel).map_err(|err| {
+            DetectorError::Host(format!("arming the detector fuel budget: {err:#}"))
+        })?;
         self.store.set_epoch_deadline(1);
         Ok(())
     }
@@ -643,6 +699,18 @@ fn convert_claim(claim: detector_exports::Claim) -> Claim {
             .collect(),
         prune: claim.prune,
     }
+}
+
+/// Whether a guest call failed because it used up its fuel budget.
+///
+/// The trap may be wrapped with context by wasmtime, so walk the whole error
+/// chain instead of only inspecting the top-level error.
+fn is_out_of_fuel(err: &wasmtime::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<wasmtime::Trap>()
+            .is_some_and(|trap| *trap == wasmtime::Trap::OutOfFuel)
+    })
 }
 
 /// Advances the engine epoch on a bounded interval so epoch-based cancellation

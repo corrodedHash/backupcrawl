@@ -32,6 +32,7 @@ pub struct MockHost {
     exec_requests: Vec<ExecRequest>,
     cache: HashMap<String, Vec<u8>>,
     cache_sets: Vec<(String, Vec<u8>)>,
+    cache_reads: Vec<(String, u64, u32)>,
     http_results: VecDeque<Result<HttpResponse, HostError>>,
     http_requests: Vec<HttpRequest>,
     logs: Vec<(LogLevel, String)>,
@@ -112,6 +113,11 @@ impl MockHost {
         &self.cache_sets
     }
 
+    /// All `cache_read` calls in call order.
+    pub fn cache_reads(&self) -> &[(String, u64, u32)] {
+        &self.cache_reads
+    }
+
     /// Current cache contents (including pre-populated entries).
     pub fn cache(&self) -> &HashMap<String, Vec<u8>> {
         &self.cache
@@ -159,6 +165,19 @@ impl Host for MockHost {
         Ok(())
     }
 
+    fn cache_read(
+        &mut self,
+        key: &str,
+        offset: u64,
+        len: u32,
+    ) -> Result<Option<Vec<u8>>, HostError> {
+        self.cache_reads.push((key.to_owned(), offset, len));
+        match self.cache.get(key) {
+            None => Ok(None),
+            Some(bytes) => Ok(Some(slice_at(bytes, offset, len as usize))),
+        }
+    }
+
     fn http(&mut self, request: &HttpRequest) -> Result<HttpResponse, HostError> {
         self.http_requests.push(request.clone());
         self.http_results
@@ -169,6 +188,13 @@ impl Host for MockHost {
     fn log(&mut self, level: LogLevel, message: &str) {
         self.logs.push((level, message.to_owned()));
     }
+}
+
+/// The `[offset, offset + len)` slice of `bytes`, clamped to the end.
+fn slice_at(bytes: &[u8], offset: u64, len: usize) -> Vec<u8> {
+    let start = (offset as usize).min(bytes.len());
+    let end = start.saturating_add(len).min(bytes.len());
+    bytes[start..end].to_vec()
 }
 
 #[cfg(test)]

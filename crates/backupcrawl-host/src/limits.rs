@@ -22,8 +22,11 @@ const MIB: usize = 1024 * 1024;
 /// Resource limits applied to a detector instance and its host imports.
 ///
 /// The [`Default`] implementation chooses values from section 9 of the rewrite
-/// plan (256 MiB linear memory, ~50 ms cancellation granularity, 64 MiB exec and
-/// HTTP output caps).
+/// plan (256 MiB linear memory, ~50 ms cancellation granularity, 64 MiB exec
+/// and HTTP output caps). The pacman index is now a compact, lazily-read
+/// structure that fits in well under 50 MiB (see
+/// `docs/pacman-index-and-limits.md`), so the temporary bump to 512 MiB that the
+/// eager JSON index needed is no longer required.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Limits {
     /// Maximum number of bytes a single linear memory may grow to.
@@ -33,13 +36,23 @@ pub struct Limits {
     /// host).
     pub max_memory: usize,
 
-    /// Fuel (roughly: executed instructions) granted to each guest call.
+    /// Fuel (roughly: executed instructions) granted to each `check_*`/`finish`
+    /// guest call.
     ///
-    /// The budget is refilled before every `init`/`check_*`/`finish` call, so a
-    /// detector can do real work across the scan while a single runaway call
-    /// cannot run forever. Exhausting it raises `Trap::OutOfFuel`, which the
-    /// runtime records as a per-plugin error (the call becomes "no claim").
+    /// The budget is refilled before every call, so a detector can do real work
+    /// across the scan while a single runaway call cannot run forever.
+    /// Exhausting it raises `Trap::OutOfFuel`, which the runtime records as a
+    /// per-plugin error (the call becomes "no claim").
     pub fuel_per_call: u64,
+
+    /// Fuel granted to the `init` call.
+    ///
+    /// `init` is allowed a larger budget than [`fuel_per_call`](Self::fuel_per_call)
+    /// because preparation is legitimately heavy: building the pacman index for
+    /// a full Arch installation consumes roughly 51 billion fuel. Fuel is a
+    /// runaway guard, not a cap on expected work, so `init` gets its own,
+    /// larger ceiling. A runaway `init` still runs out and disables the plugin.
+    pub init_fuel: u64,
 
     /// How often the epoch watchdog advances the engine epoch, in milliseconds.
     ///
@@ -71,6 +84,7 @@ impl Default for Limits {
         Self {
             max_memory: 256 * MIB,
             fuel_per_call: 10_000_000_000,
+            init_fuel: 200_000_000_000,
             epoch_interval_ms: 50,
             exec_timeout_ms: 30_000,
             exec_output_cap: 64 * MIB,
@@ -101,6 +115,7 @@ mod tests {
         assert_eq!(limits.exec_output_cap, 64 * MIB);
         assert_eq!(limits.http_body_cap, 64 * MIB);
         assert!(limits.fuel_per_call > 0);
+        assert!(limits.init_fuel >= limits.fuel_per_call);
         assert!(limits.max_consecutive_failures > 0);
     }
 

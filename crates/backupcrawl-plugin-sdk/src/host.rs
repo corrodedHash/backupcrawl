@@ -32,6 +32,20 @@ pub trait Host {
     /// Write a persistent per-plugin cache entry.
     fn cache_set(&mut self, key: &str, value: &[u8]) -> Result<(), HostError>;
 
+    /// Read up to `len` bytes at `offset` from a cache entry.
+    ///
+    /// `Ok(None)` means the entry does not exist (a miss, like
+    /// [`cache_get`](Host::cache_get)); an empty buffer means the offset is at
+    /// or past the end. The host caps `len`. This is the entry-by-entry
+    /// counterpart of `cache_get` for large cached indexes that should not be
+    /// materialized in full.
+    fn cache_read(
+        &mut self,
+        key: &str,
+        offset: u64,
+        len: u32,
+    ) -> Result<Option<Vec<u8>>, HostError>;
+
     /// Perform an allowlisted HTTP request.
     fn http(&mut self, request: &HttpRequest) -> Result<HttpResponse, HostError>;
 

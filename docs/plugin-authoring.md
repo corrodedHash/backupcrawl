@@ -143,6 +143,7 @@ through the `Host` trait, and the host grants only what the manifest declares:
 | `stat(path)` | Unix metadata WASI omits: `mode`, `uid`, `gid`, `nlink`, `size`, `mtime` | always |
 | `exec(request)` | Run an allowlisted program with args/env/stdin/timeout | `exec = ["prog"]` |
 | `cache_get`/`cache_set` | Persistent per-plugin key/value store under `$XDG_CACHE_HOME/backupcrawl/plugins/<name>/` | `cache = true` |
+| `cache_read(key, offset, len)` | Read a byte range of a cache entry without loading it all (capped at 1 MiB per call); `none` on a miss, short at the end | `cache = true` |
 | `http(request)` | HTTP to an allowlisted origin (localhost-only by default) | `http = ["host"]` |
 | `log(level, message)` | Structured logging | always |
 
@@ -189,8 +190,10 @@ must not assume it is the only instance in the process. The frozen contract:
 - Instances share no mutable state — no process-global caches, no static
   `Mutex` state that assumes a single instance. Global preparation (for example
   a package database listing) belongs in the host cache via
-  `cache_get`/`cache_set`, where concurrent writers must be benign (last write
-  wins is fine).
+  `cache_get`/`cache_read`/`cache_set`, where concurrent writers must be benign
+  (last write wins is fine). Split a large cached index into a small, fully
+  loaded part and per-entry records read with `cache_read` (the pacman detector
+  does this) so each instance only holds what it uses.
 - The first worker's `init` is serialized and warms the cache; the rest then hit
   it. Do not rely on `init` running exactly once.
 - There are no cross-worker ordering guarantees. First-claim-wins is still

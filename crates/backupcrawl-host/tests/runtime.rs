@@ -173,6 +173,21 @@ fn guest_errors_trip_the_circuit_breaker() {
 }
 
 #[test]
+fn init_gets_the_larger_fuel_budget() {
+    let (runtime, _dir) = runtime(Limits::default());
+    let detector = detector(&runtime, CapabilityPolicy::none(), &[]);
+
+    // The fixture's init is cheap, so the remaining budget is essentially
+    // `init_fuel`. If init had been armed with `fuel_per_call` instead, this
+    // could never exceed it.
+    let remaining = detector.fuel_remaining().expect("fuel");
+    assert!(
+        remaining > runtime.limits().fuel_per_call,
+        "init should be armed with init_fuel, not fuel_per_call"
+    );
+}
+
+#[test]
 fn fuel_exhaustion_becomes_no_claim() {
     let limits = Limits {
         fuel_per_call: 1_000_000,

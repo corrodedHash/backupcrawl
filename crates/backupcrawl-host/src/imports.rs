@@ -12,7 +12,7 @@
 //! | `stat` | *(always)* | `lstat` metadata; never reads content |
 //! | `log` | *(always)* | routed to the `log` crate |
 //! | `exec` | `[capabilities] exec` | program allowlist + timeout + output caps |
-//! | `cache-get`/`cache-set` | `[capabilities] cache` | persistent per-plugin KV |
+//! | `cache-get`/`cache-set`/`cache-read` | `[capabilities] cache` | persistent per-plugin KV |
 //! | `http` | `[capabilities] http` | origin allowlist, localhost-only by default |
 //!
 //! Filesystem *content* is not an import: since M2.0 the runtime grants
@@ -28,12 +28,13 @@
 //! isolation.
 
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, UNIX_EPOCH};
+use std::{cell::RefCell, fs::File};
 
 use url::Url;
 use wasmtime::StoreLimits;
@@ -384,6 +385,15 @@ impl Host for HostState {
         self.cache.set(&key, &value)
     }
 
+    fn cache_read(
+        &mut self,
+        key: String,
+        offset: u64,
+        len: u32,
+    ) -> Result<Option<Vec<u8>>, String> {
+        self.cache.read(&key, offset, len)
+    }
+
     fn http(&mut self, request: HttpRequest) -> Result<HttpResponse, String> {
         if self.policy.http_allowlist().is_empty() {
             return Err("http: capability not granted by the manifest".to_owned());
@@ -707,11 +717,25 @@ fn parse_http_response(raw: &[u8], body_cap: usize) -> Result<HttpResponse, Stri
 struct PluginCache {
     dir: PathBuf,
     enabled: bool,
+    /// Cached read handle for the most recent [`PluginCache::read`] entry.
+    ///
+    /// Opening a file per range read would dominate an index scan that reads
+    /// one small record per looked-up path, so the handle is kept until another
+    /// key is read (or the same key is rewritten).
+    handle: RefCell<Option<(PathBuf, File)>>,
 }
+
+/// Upper bound on a single [`PluginCache::read`] so a guest cannot ask the host
+/// to materialize an arbitrarily large buffer in one call.
+const CACHE_READ_CAP: usize = 1 << 20;
 
 impl PluginCache {
     fn new(dir: PathBuf, enabled: bool) -> Self {
-        Self { dir, enabled }
+        Self {
+            dir,
+            enabled,
+            handle: RefCell::new(None),
+        }
     }
 
     fn dir(&self) -> &Path {
@@ -737,10 +761,63 @@ impl PluginCache {
         }
     }
 
+    /// Reads up to `len` bytes at `offset` from a cache entry.
+    ///
+    /// `Ok(None)` means the entry does not exist (a miss); an empty list means
+    /// the offset is at or past the end. `len` is capped at [`CACHE_READ_CAP`].
+    fn read(&self, key: &str, offset: u64, len: u32) -> Result<Option<Vec<u8>>, String> {
+        if !self.enabled {
+            log::debug!("cache: capability not granted; treating `{key}` as a miss");
+            return Ok(None);
+        }
+        let path = self.entry_path(key);
+        let mut handle = self.handle.borrow_mut();
+
+        let reuse = matches!(handle.as_ref(), Some((cached, _)) if *cached == path);
+        if !reuse {
+            match File::open(&path) {
+                Ok(file) => *handle = Some((path.clone(), file)),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(err) => {
+                    return Err(format!("cache: cannot open {}: {err}", path.display()));
+                }
+            }
+        }
+
+        let capped = (len as usize).min(CACHE_READ_CAP);
+        if capped != len as usize {
+            log::warn!("cache: `{key}` read of {len} bytes capped to {capped}");
+        }
+
+        let Some((_, file)) = handle.as_mut() else {
+            return Ok(None);
+        };
+        file.seek(SeekFrom::Start(offset))
+            .map_err(|err| format!("cache: cannot seek {}: {err}", path.display()))?;
+
+        let mut buffer = vec![0u8; capped];
+        let mut filled = 0;
+        while filled < buffer.len() {
+            match file.read(&mut buffer[filled..]) {
+                Ok(0) => break,
+                Ok(read) => filled += read,
+                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(err) => {
+                    return Err(format!("cache: cannot read {}: {err}", path.display()));
+                }
+            }
+        }
+        buffer.truncate(filled);
+        Ok(Some(buffer))
+    }
+
     fn set(&self, key: &str, value: &[u8]) -> Result<(), String> {
         if !self.enabled {
             return Err("cache: capability not granted by the manifest".to_owned());
         }
+        // A rename replaces the inode, so any cached read handle for this entry
+        // would read stale bytes.
+        *self.handle.borrow_mut() = None;
         fs::create_dir_all(&self.dir)
             .map_err(|err| format!("cache: cannot create {}: {err}", self.dir.display()))?;
 
@@ -993,6 +1070,62 @@ mod tests {
             second.cache_get("../escape".to_owned()),
             Some(b"x".to_vec())
         );
+    }
+
+    #[test]
+    fn cache_read_returns_ranges_and_handles_misses() {
+        let dir = tempfile::tempdir().unwrap();
+        let policy = CapabilityPolicy::none().with_cache(true);
+        let mut host = state(policy, dir.path());
+        host.cache_set("blob".to_owned(), b"0123456789".to_vec())
+            .unwrap();
+
+        assert_eq!(
+            host.cache_read("blob".to_owned(), 2, 4).unwrap(),
+            Some(b"2345".to_vec())
+        );
+        // A range that crosses the end is short, not an error.
+        assert_eq!(
+            host.cache_read("blob".to_owned(), 8, 10).unwrap(),
+            Some(b"89".to_vec())
+        );
+        // At or past the end is empty.
+        assert_eq!(
+            host.cache_read("blob".to_owned(), 10, 4).unwrap(),
+            Some(Vec::new())
+        );
+        // A missing entry is a miss, not an error.
+        assert_eq!(host.cache_read("missing".to_owned(), 0, 4).unwrap(), None);
+
+        // Rewriting an entry invalidates the cached read handle.
+        host.cache_set("blob".to_owned(), b"abcdefghij".to_vec())
+            .unwrap();
+        assert_eq!(
+            host.cache_read("blob".to_owned(), 0, 3).unwrap(),
+            Some(b"abc".to_vec())
+        );
+    }
+
+    #[test]
+    fn cache_read_without_the_capability_is_a_miss() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut host = state(CapabilityPolicy::none(), dir.path());
+        assert_eq!(host.cache_read("blob".to_owned(), 0, 4).unwrap(), None);
+    }
+
+    #[test]
+    fn cache_read_caps_the_requested_length() {
+        let dir = tempfile::tempdir().unwrap();
+        let policy = CapabilityPolicy::none().with_cache(true);
+        let mut host = state(policy, dir.path());
+        let big = vec![7u8; CACHE_READ_CAP + 16];
+        host.cache_set("big".to_owned(), big).unwrap();
+
+        let read = host
+            .cache_read("big".to_owned(), 0, u32::MAX)
+            .unwrap()
+            .expect("present");
+        assert_eq!(read.len(), CACHE_READ_CAP);
     }
 
     #[test]
