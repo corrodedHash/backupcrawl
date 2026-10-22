@@ -25,7 +25,22 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all-targets -- -D warnings
+      # `backupcrawl-host`'s and `backupcrawl-cli`'s build scripts compile the
+      # bundled detectors, so even a lint build needs cargo-component. The exact
+      # binary no longer has to match a committed artifact, so the prebuilt is
+      # fine; the source build is only a fallback.
+      - name: Install cargo-component (prebuilt)
+        id: install-cargo-component
+        continue-on-error: true
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-component@0.21.1
+      - name: Install cargo-component (from source)
+        if: steps.install-cargo-component.outcome == 'failure'
+        run: cargo install cargo-component --version 0.21.1 --locked
+      # `--workspace` explicitly includes the wasm-only component crates, which
+      # are excluded from `default-members` (see the workspace manifest).
+      - run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
     runs-on: ubuntu-latest
@@ -33,6 +48,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - uses: Swatinem/rust-cache@v2
+      # The test build runs the same build scripts that build the detectors.
+      - name: Install cargo-component (prebuilt)
+        id: install-cargo-component
+        continue-on-error: true
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-component@0.21.1
+      - name: Install cargo-component (from source)
+        if: steps.install-cargo-component.outcome == 'failure'
+        run: cargo install cargo-component --version 0.21.1 --locked
       # Runs the whole suite and records wall/CPU/RSS/IO metrics per test binary
       # (see docs/test-metrics.md). The comparison against the committed
       # baseline is a local tool: GitHub runners differ from developer machines.
@@ -47,14 +72,15 @@ jobs:
             test-stats.json
             test-stats.md
 
+  # Replaces the old "rebuild and `git diff --exit-code`" staleness job: the
+  # `.wasm` artifacts are no longer committed, so there is nothing to diff. This
+  # job instead proves the whole component pipeline runs from a clean checkout.
   components:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - uses: Swatinem/rust-cache@v2
-      # Pin the same cargo-component that produced the checked-in fixture;
-      # fall back to building it from source when no prebuilt is available.
       - name: Install cargo-component (prebuilt)
         id: install-cargo-component
         continue-on-error: true
@@ -64,32 +90,16 @@ jobs:
       - name: Install cargo-component (from source)
         if: steps.install-cargo-component.outcome == 'failure'
         run: cargo install cargo-component --version 0.21.1 --locked
-      - name: Rebuild fixture components and fail on stale artifacts
+      # The four bundled detectors are built by `backupcrawl-host`'s build script
+      # and the CLI fixture by `backupcrawl-cli`'s, so a plain release build
+      # exercises the whole pipeline and links the binary that embeds them.
+      - name: Build the release binary with the bundled detectors
+        run: cargo build --release
+      - name: Assert the components were generated and bundled
         run: |
-          scripts/build-test-components.sh
-          git diff --exit-code -- crates/backupcrawl-host/tests/fixtures
-      # The SDK example is the authoring-path fixture: it must componentize
-      # with the same cargo-component on every change.
-      - name: Build the SDK example component
-        run: scripts/build-example-plugin.sh
-      # The bundled git plugin is embedded in the binary via `include_bytes!`;
-      # fail if the committed component is stale (or not reproducible).
-      - name: Rebuild the bundled git plugin and fail on a stale artifact
-        run: |
-          scripts/build-git-plugin.sh
-          git diff --exit-code -- plugins/git/dist/git.wasm
-      # Same for the bundled pacman plugin.
-      - name: Rebuild the bundled pacman plugin and fail on a stale artifact
-        run: |
-          scripts/build-pacman-plugin.sh
-          git diff --exit-code -- plugins/pacman/dist/pacman.wasm
-      # Same for the bundled chezmoi plugin.
-      - name: Rebuild the bundled chezmoi plugin and fail on a stale artifact
-        run: |
-          scripts/build-chezmoi-plugin.sh
-          git diff --exit-code -- plugins/chezmoi/dist/chezmoi.wasm
-      # Same for the bundled syncthing plugin.
-      - name: Rebuild the bundled syncthing plugin and fail on a stale artifact
-        run: |
-          scripts/build-syncthing-plugin.sh
-          git diff --exit-code -- plugins/syncthing/dist/syncthing.wasm
+          for plugin in git pacman chezmoi syncthing; do
+            test -s "plugins/$plugin/dist/$plugin.wasm"
+          done
+          test -s crates/backupcrawl-host/tests/fixtures/test-detector.wasm
+          test -s crates/backupcrawl-cli/tests/fixtures/detectors/dotbak/dotbak.wasm
+          test -x target/release/backupcrawl

@@ -104,9 +104,9 @@ cached so a fixed template is retried by the next scan.
 ## Build
 
 ```console
-$ scripts/build-chezmoi-plugin.sh          # reproducible wasm32-wasip2 release
+$ scripts/build-chezmoi-plugin.sh          # builds the wasm32-wasip2 release
 ```
 
-The component is written to `dist/chezmoi.wasm`, embedded in the binary via
-`crates/backupcrawl-host/src/bundled.rs`, and rebuilt by CI; a stale artifact
-fails the build.
+The component is written to `dist/chezmoi.wasm` (gitignored; also built
+automatically by `scripts/build-components.sh`) and is embedded in the binary via
+`crates/backupcrawl-host/src/bundled.rs`.

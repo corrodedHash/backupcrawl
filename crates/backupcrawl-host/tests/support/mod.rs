@@ -60,7 +60,7 @@ impl Harness {
         let manifest = Manifest::parse(plugin.manifest).expect("bundled git manifest");
         let policy = CapabilityPolicy::from_manifest(&manifest);
         let mut detector = shared()
-            .instantiate(plugin.wasm, PLUGIN, policy)
+            .instantiate(plugin.wasm(), PLUGIN, policy)
             .expect("instantiate git component");
         detector
             .init(&scan_info(root, config))

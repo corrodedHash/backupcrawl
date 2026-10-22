@@ -56,7 +56,7 @@ fn detector(db: &Path, root: &Path, config: &[(&str, &str)]) -> WasmDetector {
     let manifest = Manifest::parse(plugin.manifest).expect("bundled pacman manifest");
     let policy = CapabilityPolicy::from_manifest(&manifest);
     let mut detector = runtime()
-        .instantiate(plugin.wasm, "pacman", policy)
+        .instantiate(plugin.wasm(), "pacman", policy)
         .expect("instantiate pacman component");
 
     let mut pairs = vec![("db-path".to_owned(), db.display().to_string())];
@@ -519,7 +519,7 @@ fn missing_database_is_an_init_error() {
     let manifest = Manifest::parse(plugin.manifest).unwrap();
     let mut detector = runtime()
         .instantiate(
-            plugin.wasm,
+            plugin.wasm(),
             "pacman",
             CapabilityPolicy::from_manifest(&manifest),
         )
