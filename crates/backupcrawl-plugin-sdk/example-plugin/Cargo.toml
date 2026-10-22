@@ -1,0 +1,18 @@
+[package]
+name = "backupcrawl-plugin-example"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Example backupcrawl detector built with the plugin SDK"
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.component]
+target = { path = "wit", world = "plugin" }
+
+[dependencies]
+backupcrawl-plugin-sdk = { path = ".." }

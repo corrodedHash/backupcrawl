@@ -1,0 +1,15 @@
+[plugin]
+name = "dotbak"
+version = "0.1.0"
+api = "1"
+description = "SDK example detector used as an end-to-end CLI crawl fixture"
+license = "MIT"
+
+[hooks]
+dir = true
+file = true
+priority = 5
+
+[capabilities]
+# `init` uses the persistent key/value cache to count invocations.
+cache = true

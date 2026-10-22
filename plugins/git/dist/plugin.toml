@@ -1,0 +1,29 @@
+[plugin]
+name = "git"
+version = "0.1.0"
+api = "1"
+description = "Git repositories and their sync state"
+license = "MIT"
+
+[hooks]
+# Directories detect repository roots, bare repositories and git metadata.
+dir = true
+# Files answer from the per-repository status cache (ignored reporting; M1.8).
+file = true
+# Symlinks inside a repository are covered by the repo-level claim; explicit
+# symlink claims arrive with the M2 symlink work.
+symlink = false
+priority = 10
+
+[capabilities]
+# The gix backend reads repository data in-process and needs no `exec`; the
+# `backend = "exec"` fallback (M1.9) runs `git status` and `git rev-parse`
+# through the host `exec` import, which this allowlist enables. Nothing runs
+# unless the fallback is selected in `[plugins.git]`.
+exec = ["git"]
+# Ancestor-repository discovery walks above the crawl root, so the git detector
+# declares the whole filesystem (M2.0). The grant is real and read-only; writes
+# fail in `cap-std`.
+fs-read = ["/"]
+http = []
+cache = false

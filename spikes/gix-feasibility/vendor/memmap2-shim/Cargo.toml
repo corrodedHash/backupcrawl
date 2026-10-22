@@ -1,0 +1,10 @@
+[package]
+name = "memmap2"
+version = "0.9.11"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "M1.7 spike shim: memmap2 API backed by in-memory reads for wasm32-wasip2"
+publish = false
+
+[lib]
+path = "src/lib.rs"

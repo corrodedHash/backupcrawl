@@ -1,0 +1,35 @@
+[package]
+name = "backupcrawl-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+backupcrawl-core.workspace = true
+dirs.workspace = true
+glob.workspace = true
+hex.workspace = true
+log.workspace = true
+serde.workspace = true
+sha2.workspace = true
+toml.workspace = true
+toml_edit.workspace = true
+url.workspace = true
+wasmtime.workspace = true
+wasmtime-wasi.workspace = true
+zstd.workspace = true
+
+[build-dependencies]
+# Compresses the build-time `plugins/*/dist/*.wasm` components into `OUT_DIR`
+# (see `build.rs` and `src/bundled.rs`).
+zstd.workspace = true
+
+[dev-dependencies]
+flate2.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true

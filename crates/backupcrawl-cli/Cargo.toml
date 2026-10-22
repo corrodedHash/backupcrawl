@@ -1,0 +1,32 @@
+[package]
+name = "backupcrawl-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+
+[[bin]]
+name = "backupcrawl"
+path = "src/main.rs"
+
+[dependencies]
+backupcrawl-core.workspace = true
+backupcrawl-host = { path = "../backupcrawl-host" }
+anyhow.workspace = true
+clap.workspace = true
+console.workspace = true
+dirs.workspace = true
+env_logger.workspace = true
+indicatif.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+serde_json.workspace = true
+tempfile.workspace = true

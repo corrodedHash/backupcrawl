@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Installs the toolchain, components and wasm targets from rust-toolchain.toml.
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - run: cargo fmt --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+      # `backupcrawl-host`'s and `backupcrawl-cli`'s build scripts compile the
+      # bundled detectors, so even a lint build needs cargo-component. The exact
+      # binary no longer has to match a committed artifact, so the prebuilt is
+      # fine; the source build is only a fallback.
+      - name: Install cargo-component (prebuilt)
+        id: install-cargo-component
+        continue-on-error: true
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-component@0.21.1
+      - name: Install cargo-component (from source)
+        if: steps.install-cargo-component.outcome == 'failure'
+        run: cargo install cargo-component --version 0.21.1 --locked
+      # `--workspace` explicitly includes the wasm-only component crates, which
+      # are excluded from `default-members` (see the workspace manifest).
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+      # The test build runs the same build scripts that build the detectors.
+      - name: Install cargo-component (prebuilt)
+        id: install-cargo-component
+        continue-on-error: true
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-component@0.21.1
+      - name: Install cargo-component (from source)
+        if: steps.install-cargo-component.outcome == 'failure'
+        run: cargo install cargo-component --version 0.21.1 --locked
+      # Runs the whole suite and records wall/CPU/RSS/IO metrics per test binary
+      # (see docs/test-metrics.md). The comparison against the committed
+      # baseline is a local tool: GitHub runners differ from developer machines.
+      - name: Test with resource metrics
+        run: python3 scripts/test-stats.py --output test-stats.json --markdown test-stats.md
+      - name: Upload test metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-stats
+          path: |
+            test-stats.json
+            test-stats.md
+
+  # Replaces the old "rebuild and `git diff --exit-code`" staleness job: the
+  # `.wasm` artifacts are no longer committed, so there is nothing to diff. This
+  # job instead proves the whole component pipeline runs from a clean checkout.
+  components:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-component (prebuilt)
+        id: install-cargo-component
+        continue-on-error: true
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-component@0.21.1
+      - name: Install cargo-component (from source)
+        if: steps.install-cargo-component.outcome == 'failure'
+        run: cargo install cargo-component --version 0.21.1 --locked
+      # The four bundled detectors are built by `backupcrawl-host`'s build script
+      # and the CLI fixture by `backupcrawl-cli`'s, so a plain release build
+      # exercises the whole pipeline and links the binary that embeds them.
+      - name: Build the release binary with the bundled detectors
+        run: cargo build --release
+      - name: Assert the components were generated and bundled
+        run: |
+          for plugin in git pacman chezmoi syncthing; do
+            test -s "plugins/$plugin/dist/$plugin.wasm"
+          done
+          test -s crates/backupcrawl-host/tests/fixtures/test-detector.wasm
+          test -s crates/backupcrawl-cli/tests/fixtures/detectors/dotbak/dotbak.wasm
+          test -x target/release/backupcrawl

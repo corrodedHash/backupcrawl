@@ -1,0 +1,7 @@
+[plugin]
+name = "alpha"
+version = "2.0.0"
+api = "1"
+
+[hooks]
+file = true

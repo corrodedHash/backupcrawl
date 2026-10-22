@@ -1,0 +1,9 @@
+# Project-local cargo configuration.
+#
+# Full debug info (`debug = 2`, the default) dominates the size of a debug
+# `target/` — several gigabytes for the wasmtime tree. `debug = 1` keeps line
+# tables (usable backtraces with file/line) while dropping variable and type
+# blobs. Release builds are untouched, so the committed WebAssembly components
+# stay byte-reproducible (see scripts/wasm-build-env.sh).
+[profile.dev]
+debug = 1

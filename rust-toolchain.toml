@@ -1,0 +1,7 @@
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
+# wasm32-wasip1 is what cargo-component 0.21.1 builds and componentizes
+# (via the WASI preview1 adapter); wasm32-wasip2 is the component target the
+# design pins and is used by plain `cargo build` workflows.
+targets = ["wasm32-wasip1", "wasm32-wasip2"]

@@ -1,0 +1,7 @@
+[plugin]
+name = "bad-cap"
+version = "0.1.0"
+api = "1"
+
+[capabilities]
+sudo = true
