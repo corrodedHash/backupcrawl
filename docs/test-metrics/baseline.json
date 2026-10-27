@@ -1,6 +1,8 @@
 {
-  "schema": 1,
-  "environment": {
+  "schema": 2,
+  "host": {
+    "os": "Linux",
+    "arch": "x86_64",
     "cpu": "AMD Ryzen 7 8840U w/ Radeon 780M Graphics",
     "logical_cpus": 16,
     "mem_total_mib": 15244.7,

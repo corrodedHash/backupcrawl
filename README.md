@@ -67,10 +67,11 @@ block I/O, build cost and the cold wasmtime JIT cost per test binary, and checks
 them against a committed baseline:
 
     scripts/test-stats.py --check          # fail on regressions
+    scripts/test-stats.py --check --force  # compare timings on any host
     scripts/test-stats.py --update-baseline
 
-See [`docs/test-metrics.md`](docs/test-metrics.md) for the metric definitions and
-the baseline policy.
+See [`docs/test-metrics.md`](docs/test-metrics.md) for the metric definitions,
+the host fingerprint and the baseline policy.
 
 ## Usage
 

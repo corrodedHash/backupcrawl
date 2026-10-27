@@ -18,6 +18,7 @@ committed baseline so growth is visible in review.
 Usage:
     scripts/test-stats.py                      # collect + print a table
     scripts/test-stats.py --check              # collect + fail on regressions
+    scripts/test-stats.py --check --force      # compare timings on any host
     scripts/test-stats.py --update-baseline    # write the committed baseline
     scripts/test-stats.py --skip-cold          # skip the ~10 s cold-JIT probe
     scripts/test-stats.py --test-threads 4     # cap libtest fan-out
@@ -61,6 +62,19 @@ FLOORS = {
     "read_mib": 0.5,
     "write_mib": 0.5,
 }
+
+# Baseline schema 2 records a host fingerprint so wall/CPU/RSS/IO/cold-JIT
+# figures are only compared on the machine that produced them.
+BASELINE_SCHEMA = 2
+HOST_FIELDS = (
+    "os",
+    "arch",
+    "cpu",
+    "logical_cpus",
+    "mem_total_mib",
+    "rustc",
+    "target_dir",
+)
 
 
 @dataclass
@@ -226,11 +240,14 @@ def env_fingerprint() -> dict[str, Any]:
         ).stdout.strip()
     )
     target = target_dir()
+    system = os.uname()
     return {
+        "os": system.sysname,
+        "arch": system.machine,
         "cpu": cpu,
         "logical_cpus": os.cpu_count(),
         "mem_total_mib": round(mem_kib / 1024, 1) if mem_kib else None,
-        "kernel": os.uname().release,
+        "kernel": system.release,
         "rustc": rustc,
         "python": sys.version.split()[0],
         "commit": commit,
@@ -238,6 +255,64 @@ def env_fingerprint() -> dict[str, Any]:
         "target_dir": str(target),
         "test_threads": os.environ.get("RUST_TEST_THREADS", "auto"),
     }
+
+
+def host_fingerprint(environment: dict[str, Any]) -> dict[str, Any]:
+    """The host-dependent subset of an environment record."""
+
+    return {field: environment.get(field) for field in HOST_FIELDS}
+
+
+def baseline_host(baseline: dict[str, Any]) -> dict[str, Any]:
+    """The host fingerprint stored in a baseline.
+
+    Schema 1 baselines have no `host` object; they stored a partial record under
+    `environment`, so that is used as a best-effort fallback.
+    """
+
+    host = baseline.get("host")
+    if isinstance(host, dict):
+        return host
+    environment = baseline.get("environment") or {}
+    return {
+        field: environment[field] for field in HOST_FIELDS if field in environment
+    }
+
+
+def host_mismatches(
+    environment: dict[str, Any], baseline: dict[str, Any]
+) -> list[str]:
+    """Describes every fingerprint field that differs from the baseline host."""
+
+    old_host = baseline_host(baseline)
+    new_host = host_fingerprint(environment)
+    mismatches = []
+    for field in HOST_FIELDS:
+        old = old_host.get(field)
+        new = new_host.get(field)
+        if _same_host_value(field, old, new):
+            continue
+        mismatches.append(f"{field}: {old!r} -> {new!r}")
+    return mismatches
+
+
+def _same_host_value(field: str, old: Any, new: Any) -> bool:
+    # An absent field cannot prove a mismatch (schema 1 baselines predate the
+    # OS/architecture fingerprint).
+    if old is None:
+        return True
+    if old == new:
+        return True
+    # Total memory moves slightly with kernel/firmware reservations; treat a
+    # sub-percent difference as the same machine.
+    if (
+        field == "mem_total_mib"
+        and isinstance(old, (int, float))
+        and isinstance(new, (int, float))
+        and old > 0
+    ):
+        return abs(new - old) / old <= 0.01
+    return False
 
 
 def target_dir() -> Path:
@@ -425,11 +500,8 @@ def baseline_view(report: dict[str, Any]) -> dict[str, Any]:
     """The stable subset written to the committed baseline."""
 
     return {
-        "schema": 1,
-        "environment": {
-            key: report["environment"][key]
-            for key in ("cpu", "logical_cpus", "mem_total_mib", "rustc", "target_dir")
-        },
+        "schema": BASELINE_SCHEMA,
+        "host": host_fingerprint(report["environment"]),
         "totals": report["totals"],
         "build": {
             key: report["build"][key]
@@ -467,6 +539,7 @@ def compare(
     rss_pct: float,
     io_pct: float,
     cold_pct: float,
+    force: bool = False,
 ) -> list[str]:
     problems: list[str] = []
     base_suites = {suite["name"]: suite for suite in baseline.get("suites", [])}
@@ -478,10 +551,36 @@ def compare(
         ("read_mib", io_pct, "read"),
         ("write_mib", io_pct, "write"),
     ]
+
+    # Timing, peak RSS, block I/O and cold-JIT cost depend on the machine, so
+    # they are only meaningful against a baseline recorded on the same host.
+    schema = baseline.get("schema", 1)
+    mismatches = host_mismatches(report["environment"], baseline)
+    compare_timings = force or not mismatches
+    if schema < BASELINE_SCHEMA:
+        print(f"  baseline schema {schema} has no complete host fingerprint")
+    if mismatches:
+        print("  host mismatch: " + "; ".join(mismatches))
+        if force:
+            print("  comparing host-sensitive metrics anyway (--force)")
+        else:
+            print(
+                "  skipping host-sensitive checks (wall, CPU, RSS, I/O, "
+                "cold JIT); use --force to compare them anyway"
+            )
+
     for name, current in current_suites.items():
         base = base_suites.get(name)
         if base is None:
             print(f"  new suite: {name} ({_suite_line(current)})")
+            continue
+        # Test counts are deterministic and checked on every host: losing tests
+        # is a regression even when the timing figures are not comparable.
+        old_tests = base.get("tests", 0)
+        new_tests = current.get("tests", 0)
+        if new_tests < old_tests:
+            problems.append(f"{name}: tests {old_tests} -> {new_tests}")
+        if not compare_timings:
             continue
         for metric, threshold, label in metrics:
             old = base.get(metric, 0)
@@ -493,35 +592,47 @@ def compare(
                     f"{name}: {label} {old:.3f} -> {new:.3f} "
                     f"(+{(new / old - 1) * 100:.0f}%)"
                 )
-    old_totals = baseline.get("totals", {})
-    new_totals = report["totals"]
-    for metric, threshold, label in (
-        ("wall_s", wall_pct, "total wall"),
-        ("cpu_s", cpu_pct, "total cpu"),
-        ("read_mib", io_pct, "total read"),
-        ("write_mib", io_pct, "total write"),
-    ):
-        old = old_totals.get(metric, 0)
-        new = new_totals.get(metric, 0)
-        if old < FLOORS[metric]:
-            continue
-        if new > old * (1 + threshold / 100):
+    for name, base in base_suites.items():
+        if name not in current_suites:
             problems.append(
-                f"{label}: {old:.3f} -> {new:.3f} (+{(new / old - 1) * 100:.0f}%)"
+                f"{name}: suite missing (baseline had {base.get('tests', 0)} tests)"
             )
-    # Build cost is reported but not enforced: a source change legitimately
-    # triggers a large incremental/cold rebuild, while a no-op run is ~0.2 s.
-    old_cold = baseline.get("cold_jit")
-    new_cold = report.get("cold_jit")
-    if old_cold and new_cold and old_cold.get("wall_s", 0) > 0:
-        if new_cold["wall_s"] > old_cold["wall_s"] * (1 + cold_pct / 100):
-            problems.append(
-                f"cold JIT wall: {old_cold['wall_s']:.3f} -> "
-                f"{new_cold['wall_s']:.3f}"
-            )
+
+    if compare_timings:
+        old_totals = baseline.get("totals", {})
+        new_totals = report["totals"]
+        for metric, threshold, label in (
+            ("wall_s", wall_pct, "total wall"),
+            ("cpu_s", cpu_pct, "total cpu"),
+            ("read_mib", io_pct, "total read"),
+            ("write_mib", io_pct, "total write"),
+        ):
+            old = old_totals.get(metric, 0)
+            new = new_totals.get(metric, 0)
+            if old < FLOORS[metric]:
+                continue
+            if new > old * (1 + threshold / 100):
+                problems.append(
+                    f"{label}: {old:.3f} -> {new:.3f} (+{(new / old - 1) * 100:.0f}%)"
+                )
+        # Build cost is reported but not enforced: a source change legitimately
+        # triggers a large incremental/cold rebuild, while a no-op run is ~0.2 s.
+        old_cold = baseline.get("cold_jit")
+        new_cold = report.get("cold_jit")
+        if old_cold and new_cold and old_cold.get("wall_s", 0) > 0:
+            if new_cold["wall_s"] > old_cold["wall_s"] * (1 + cold_pct / 100):
+                problems.append(
+                    f"cold JIT wall: {old_cold['wall_s']:.3f} -> "
+                    f"{new_cold['wall_s']:.3f}"
+                )
+
+    # Artifact presence and size are deterministic, so they are checked on any
+    # host.
+    problems.extend(artifact_problems(report, baseline))
+
     # The target size is only comparable when the run used the same target dir;
     # worktrees and per-task target dirs legitimately differ.
-    old_target = baseline.get("environment", {}).get("target_dir")
+    old_target = baseline_host(baseline).get("target_dir")
     if old_target == report["environment"].get("target_dir"):
         old_artifacts = baseline.get("artifacts", {}).get("target_bytes")
         new_artifacts = report["artifacts"].get("target_bytes")
@@ -529,6 +640,32 @@ def compare(
             problems.append(
                 f"target dir: {old_artifacts / 1024**3:.2f} -> "
                 f"{new_artifacts / 1024**3:.2f} GiB (+25%)"
+            )
+    return problems
+
+
+def artifact_problems(
+    report: dict[str, Any], baseline: dict[str, Any]
+) -> list[str]:
+    """Checks that the baseline's generated `.wasm` artifacts still exist."""
+
+    problems: list[str] = []
+    old_wasm = {
+        item["path"]: item.get("bytes", 0)
+        for item in baseline.get("artifacts", {}).get("wasm", [])
+    }
+    new_wasm = {
+        item["path"]: item.get("bytes", 0)
+        for item in report.get("artifacts", {}).get("wasm", [])
+    }
+    for path, old_bytes in sorted(old_wasm.items()):
+        if path not in new_wasm:
+            problems.append(f"wasm artifact missing: {path}")
+            continue
+        new_bytes = new_wasm[path]
+        if old_bytes and new_bytes > old_bytes * 1.25:
+            problems.append(
+                f"wasm artifact: {path} {old_bytes} -> {new_bytes} bytes (+25%)"
             )
     return problems
 
@@ -593,6 +730,11 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--markdown", type=Path, default=DEFAULT_MARKDOWN)
     parser.add_argument("--check", action="store_true", help="fail on regressions")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="compare host-sensitive metrics even when the host differs",
+    )
     parser.add_argument(
         "--update-baseline", action="store_true", help="overwrite the committed baseline"
     )
@@ -773,6 +915,7 @@ def main() -> int:
             rss_pct=args.max_rss,
             io_pct=args.max_io,
             cold_pct=args.max_cold,
+            force=args.force,
         )
         if problems:
             print("regressions:", file=sys.stderr)
