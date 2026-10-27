@@ -285,13 +285,26 @@ fn is_git_dir(path: &Path) -> bool {
 /// Whether `path` is a repository root: a `.git` directory or `.git` file, or a
 /// bare repository (`HEAD` + `objects/` + `refs/`).
 ///
+/// A directory that only contains a stray or incomplete `.git` (for example
+/// one without `HEAD`) is not a repository and must not be claimed: it would
+/// otherwise become an `unknown` row whenever a tool cache leaves one behind.
+///
 /// The checks are deliberately cheap: `check_dir` runs for every directory of
 /// the crawl, so a plain subdirectory must not open a repository.
 fn is_repo_root(path: &Path) -> bool {
-    if path.join(".git").symlink_metadata().is_ok() {
-        return true;
+    let dot_git = path.join(".git");
+    match dot_git.symlink_metadata() {
+        // A worktree's `.git` directory always contains HEAD. A `.git` file
+        // (linked worktree/submodule) is left to the backend: its target may
+        // live elsewhere, and a broken link is worth an explicit `unknown`.
+        Ok(meta) if meta.is_dir() => dot_git.join("HEAD").is_file(),
+        Ok(_) => true,
+        Err(_) => {
+            path.join("HEAD").is_file()
+                && path.join("objects").is_dir()
+                && path.join("refs").is_dir()
+        }
     }
-    path.join("HEAD").is_file() && path.join("objects").is_dir() && path.join("refs").is_dir()
 }
 
 #[cfg(test)]
@@ -393,9 +406,11 @@ mod tests {
     #[test]
     fn unreadable_repository_is_unknown_with_a_reason() {
         let tmp = tempfile::tempdir().unwrap();
-        // A `.git` directory that is not a repository: detection claims the
-        // path, but opening fails, so the verdict is `unknown` with a reason.
+        // A `.git` directory with a HEAD but no objects/refs is broken: it
+        // still looks like a repository, so the verdict is `unknown` with a
+        // single-line reason.
         std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        std::fs::write(tmp.path().join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
 
         let mut detector = Git::default();
         let mut host = MockHost::new();
@@ -406,10 +421,26 @@ mod tests {
             .unwrap()
             .expect("a broken repository is still claimed");
         assert_eq!(claim.status, Status::Unknown);
-        assert!(
-            claim.attrs.iter().any(|attr| attr.key == "reason"),
-            "unknown must carry a reason: {claim:?}"
-        );
+        let reason = claim
+            .attrs
+            .iter()
+            .find(|attr| attr.key == "reason")
+            .expect("unknown must carry a reason");
+        assert!(!reason.value.contains('\n'), "reason: {reason:?}");
+    }
+
+    #[test]
+    fn incomplete_git_directory_is_not_a_repository() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // A stray `.git` directory without HEAD is not a repository.
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        assert!(!is_repo_root(tmp.path()));
+
+        let mut detector = Git::default();
+        let mut host = MockHost::new();
+        detector.init(&scan_info(&[]), &mut host).unwrap();
+        assert_eq!(detector.check_dir(tmp.path(), &mut host).unwrap(), None);
     }
 
     #[test]
@@ -421,8 +452,10 @@ mod tests {
         std::fs::create_dir(root.join("plain")).unwrap();
         assert!(!is_repo_root(&root.join("plain")));
 
-        // `.git` directory.
+        // `.git` directory: incomplete without HEAD, a repository once HEAD
+        // exists.
         std::fs::create_dir_all(root.join("repo/.git")).unwrap();
+        assert!(!is_repo_root(&root.join("repo")));
         std::fs::write(root.join("repo/.git/HEAD"), "ref: refs/heads/main\n").unwrap();
         assert!(is_repo_root(&root.join("repo")));
         assert!(is_git_dir(&root.join("repo/.git")));

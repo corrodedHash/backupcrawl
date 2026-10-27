@@ -540,3 +540,15 @@ fn non_repository_paths() {
         &["file.txt", "dir/nested.txt"],
     );
 }
+
+#[test]
+fn incomplete_git_directory_is_unclaimed() {
+    if !require_git() {
+        return;
+    }
+    let fx = Fixture::new();
+    std::fs::create_dir_all(fx.path().join(".git")).unwrap();
+
+    let harness = Harness::new();
+    assert_parity(&harness, fx.path(), &[], &["."], &[]);
+}
