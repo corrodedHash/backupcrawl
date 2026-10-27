@@ -1,0 +1,39 @@
+[plugin]
+name = "syncthing"
+version = "0.1.0"
+api = "1"
+description = "Syncthing folders and their cluster sync state"
+license = "MIT"
+
+[hooks]
+# Claims are made at folder-root level: the whole folder shares one status and
+# is pruned, exactly like the daemon's own `/rest/db/status` granularity.
+dir = true
+file = false
+symlink = false
+priority = 40
+
+[capabilities]
+# Detection reads `config.xml` and talks to the localhost REST API; no child
+# process is ever spawned.
+exec = []
+# Newer syncthing keeps its state under the XDG state dir, older versions under
+# the XDG config dir (authoritative read-only grant, M2.0).
+fs-read = ["~/.local/state/syncthing", "~/.config/syncthing"]
+# Loopback REST API only (plain HTTP, no TLS). `address` can be overridden in
+# `[plugins.syncthing]`, but the host still enforces this origin allowlist.
+http = ["http://127.0.0.1:8384"]
+# The parsed folder list is cached per config mtime and folder status is cached
+# for the scan duration.
+cache = true
+
+[config-schema]
+type = "object"
+properties.address.type = "string"
+properties.api-key.type = "string"
+properties.require-daemon.type = "boolean"
+properties.assume-marker-only.type = "boolean"
+properties.receive-only-changes.type = "string"
+properties.receive-only-changes.enum = ["dirty", "ahead", "clean"]
+properties.timeout-ms.type = "integer"
+properties.config-dir.type = "string"

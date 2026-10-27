@@ -1,0 +1,24 @@
+[package]
+name = "backupcrawl-plugin-chezmoi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.component]
+target = { path = "wit", world = "plugin" }
+
+[dependencies]
+backupcrawl-plugin-sdk = { path = "../../crates/backupcrawl-plugin-sdk" }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

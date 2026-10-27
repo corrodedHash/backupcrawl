@@ -1,0 +1,146 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/backupcrawl-core",
+    "crates/backupcrawl-cli",
+    "crates/backupcrawl-wit",
+    "crates/backupcrawl-host",
+    "crates/backupcrawl-plugin-sdk",
+    "crates/backupcrawl-plugin-sdk/example-plugin",
+    "crates/test-components",
+    "plugins/git",
+    "plugins/pacman",
+    "plugins/chezmoi",
+    "plugins/syncthing",
+]
+# The wasm-only component crates (`crates/test-components`,
+# `crates/backupcrawl-plugin-sdk/example-plugin` and `plugins/*`) are excluded
+# from the default build/test set: they are `cdylib`s whose wit-bindgen export
+# names (`backupcrawl:detector/...#check-dir`) are not valid in a native linker
+# version script, so a native `cargo build` of one fails to link. They are built
+# for wasm32-wasip1/wasip2 by the build scripts instead. `cargo test --workspace`
+# and `cargo clippy --workspace --all-targets` still cover them, and CI uses
+# `--workspace` (a test harness is not a cdylib, so it links fine).
+default-members = [
+    "crates/backupcrawl-core",
+    "crates/backupcrawl-cli",
+    "crates/backupcrawl-wit",
+    "crates/backupcrawl-host",
+    "crates/backupcrawl-plugin-sdk",
+]
+# The gix feasibility spike (M1.7) is a standalone workspace with its own lockfile
+# and a wasm component crate; keep it out of the main workspace. `vendor/` holds
+# the `[patch.crates-io]` shims used to build gix for wasm32-wasip2 (M1.8).
+exclude = ["spikes", "vendor"]
+
+[workspace.package]
+version = "0.3.0"
+edition = "2024"
+# 1.96 is the MSRV of wasmtime/wasmtime-wasi 49.
+rust-version = "1.96"
+authors = ["Lukas Wölfer"]
+license = "MIT"
+repository = "https://github.com/corrodedHash/backupcrawl"
+description = "Detect files which are not backed up"
+
+[workspace.dependencies]
+anyhow = "1"
+backupcrawl-core = { path = "crates/backupcrawl-core" }
+clap = { version = "4", features = ["derive"] }
+console = "0.16"
+dirs = "6"
+env_logger = "0.11"
+# The pacman detector reads gzipped BSD mtree databases; the pure-Rust backend
+# keeps the component free of a system zlib dependency.
+flate2 = "1"
+# gix 0.89 without `mmap`/`parallel`/`interrupt`/`command`/`credentials`:
+# `default-features = false` drops `max-performance-safe` (which enables
+# `parallel` and pack caches). `status` pulls `dirwalk` -> `attributes` ->
+# `excludes`; `basic` pulls `revision` (for `merge_base`) and `index`; `sha1`
+# hashes racily-clean worktree files while comparing them to the index.
+# gix uses `memmap2` and `filetime` unconditionally; both are patched below.
+gix = { version = "0.89", default-features = false, features = ["basic", "status", "sha1"] }
+glob = "0.3"
+globset = "0.4"
+hex = "0.4"
+indicatif = "0.18"
+libc = "0.2"
+log = "0.4"
+# MD5 is still the digest most pacman mtree entries carry; `sha2` is the
+# optional stronger one.
+md-5 = "0.10"
+# Syncthing configuration is XML; roxmltree is a small, non-validating read-only
+# parser with no wasm-specific dependencies.
+roxmltree = "0.21"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+tempfile = "3"
+thiserror = "2"
+toml = "0.8"
+toml_edit = "0.25"
+url = "2"
+# wasmtime with only the surface the detector host uses. The defaults drag in
+# the whole CLI/tooling feature set, none of which is reachable from
+# `crates/backupcrawl-host`: WAT text parsing (`wat`), the GC proposals
+# (`gc`, `gc-copying`, `gc-drc`, `gc-null`), `coredump`, the debug/profiling
+# hooks (`debug`, `debug-builtins`, `profiling`), the pooling allocator, wasm
+# backtrace symbolization (`addr2line`, `backtrace`, `demangle`), runtime WIT
+# parsing (`wit-parser`) and the async component model
+# (`component-model-async`, `component-model-bytes`, `stack-switching`). `async`
+# is kept because `wasmtime-wasi`'s `p2` feature unconditionally requires it,
+# even though the host links the sync variant. `parallel-compilation` is kept
+# because the bundled git component takes ~28 s to JIT-compile without it and
+# ~4 s with it; the first-run latency matters more than the small binary-size
+# saving. `cranelift` still pulls in the `pulley` interpreter (wasmtime wires
+# that feature in itself), which is not removable from here.
+wasmtime = { version = "49.0", default-features = false, features = [
+    "anyhow",
+    "async",
+    "cache",
+    "component-model",
+    "cranelift",
+    "parallel-compilation",
+    "runtime",
+    "std",
+] }
+# `p2` is the WASI preview2 surface the detectors import; `p1` (wiggle) and `p3`
+# (the async component model) are unused.
+wasmtime-wasi = { version = "49.0", default-features = false, features = ["p2"] }
+# Already linked transitively by wasmtime's on-disk component cache (also
+# without default features); used directly by `backupcrawl-host` to embed the
+# bundled detectors compressed and decompress them lazily. Keeping
+# `default-features = false` avoids pulling zstd's legacy codec and dictionary
+# builder into the binary.
+zstd = { version = "0.13", default-features = false }
+# wit-bindgen is pinned to the version cargo-component 0.21.1 generates its
+# bindings with (wit-bindgen-rust 0.41.0).
+wit-bindgen = "0.41"
+# wit-parser matches the generation used by wasmtime 49's `bindgen!`.
+wit-parser = "0.258"
+
+# gix 0.89 uses `memmap2` unconditionally (index, loose objects, packs, packed
+# refs) and `memmap2` has no wasm implementation; `filetime`'s wasm reader
+# accessors are `unimplemented!()`. Both are vendored shims (the M1.7 spike's
+# reference implementations) so the git detector can run on wasm32-wasip2.
+# See docs/rust-rewrite-plan.md §7.1 "M1.7 spike results".
+[patch.crates-io]
+memmap2 = { path = "vendor/memmap2-shim" }
+filetime = { path = "vendor/filetime" }
+
+# Distribution build for the `backupcrawl` CLI: stripped symbols, fat LTO and
+# `panic = "abort"` (which also drops the unwind/exception tables).
+#
+# This is deliberately *not* the `release` profile: `release` stays at its
+# defaults so the everyday build/test cycle is fast (fat LTO dominates the link
+# time). The WebAssembly detectors are always compiled with `release` by
+# `scripts/build-components.sh`, independent of the outer profile, so the two
+# profiles no longer need to be byte-compatible.
+#
+# Build with: cargo build --profile dist -p backupcrawl-cli
+[profile.dist]
+inherits = "release"
+strip = "symbols"
+lto = "fat"
+codegen-units = 1
+panic = "abort"

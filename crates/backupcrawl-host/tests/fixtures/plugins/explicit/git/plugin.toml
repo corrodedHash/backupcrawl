@@ -1,0 +1,18 @@
+[plugin]
+name = "git"
+version = "1.0.0"
+api = "1"
+description = "Git repositories and their sync state"
+license = "MIT"
+
+[hooks]
+dir = true
+file = true
+symlink = true
+priority = 10
+
+[capabilities]
+exec = []
+fs-read = ["~/.config/git"]
+http = []
+cache = true

@@ -1,0 +1,405 @@
+{
+  "schema": 2,
+  "host": {
+    "os": "Linux",
+    "arch": "x86_64",
+    "cpu": "AMD Ryzen 7 8840U w/ Radeon 780M Graphics",
+    "logical_cpus": 16,
+    "mem_total_mib": 15244.7,
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "target_dir": "/var/lib/opencode-agent/targets/shared"
+  },
+  "totals": {
+    "tests": 370,
+    "wall_s": 5.8894,
+    "cpu_s": 20.6125,
+    "max_rss_mib": 184.39,
+    "read_mib": 62.85,
+    "write_mib": 0.08
+  },
+  "build": {
+    "wall_s": 10.2034,
+    "cpu_s": 55.017,
+    "max_rss_mib": 1299.9
+  },
+  "cold_jit": {
+    "wall_s": 12.8407,
+    "cpu_s": 152.9341,
+    "max_rss_mib": 237.22,
+    "read_mib": 0.0,
+    "write_mib": 0.0,
+    "probes": [
+      {
+        "suite": "git_plugin",
+        "test": "ahead_of_upstream_is_ahead",
+        "passed": 1,
+        "failed": 0,
+        "wall_s": 8.7816,
+        "user_s": 113.5482,
+        "sys_s": 0.4401,
+        "cpu_s": 113.9883,
+        "max_rss_mib": 237.22,
+        "read_mib": 0.0,
+        "write_mib": 0.0,
+        "minflt": 57385,
+        "majflt": 0,
+        "nvcsw": 1746,
+        "nivcsw": 19424,
+        "exit_code": 0
+      },
+      {
+        "suite": "pacman_plugin",
+        "test": "absolute_symlink_match_and_mismatch",
+        "passed": 1,
+        "failed": 0,
+        "wall_s": 1.8431,
+        "user_s": 13.7505,
+        "sys_s": 0.1191,
+        "cpu_s": 13.8696,
+        "max_rss_mib": 124.83,
+        "read_mib": 0.0,
+        "write_mib": 0.0,
+        "minflt": 23924,
+        "majflt": 0,
+        "nvcsw": 573,
+        "nivcsw": 2842,
+        "exit_code": 0
+      },
+      {
+        "suite": "chezmoi_plugin",
+        "test": "both_columns_modified_is_dirty",
+        "passed": 1,
+        "failed": 0,
+        "wall_s": 1.4213,
+        "user_s": 15.0164,
+        "sys_s": 0.1126,
+        "cpu_s": 15.129,
+        "max_rss_mib": 104.63,
+        "read_mib": 0.0,
+        "write_mib": 0.0,
+        "minflt": 21163,
+        "majflt": 0,
+        "nvcsw": 429,
+        "nivcsw": 2680,
+        "exit_code": 0
+      },
+      {
+        "suite": "syncthing_plugin",
+        "test": "clean_folder_reports_synced_to_cluster_not_archived",
+        "passed": 1,
+        "failed": 0,
+        "wall_s": 0.7947,
+        "user_s": 9.8381,
+        "sys_s": 0.1091,
+        "cpu_s": 9.9472,
+        "max_rss_mib": 88.28,
+        "read_mib": 0.0,
+        "write_mib": 0.0,
+        "minflt": 15559,
+        "majflt": 0,
+        "nvcsw": 446,
+        "nivcsw": 1485,
+        "exit_code": 0
+      }
+    ]
+  },
+  "suites": [
+    {
+      "name": "backupcrawl",
+      "tests": 7,
+      "wall_s": 0.002,
+      "cpu_s": 0.0033,
+      "max_rss_mib": 20.45,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "backupcrawl_core",
+      "tests": 4,
+      "wall_s": 0.0173,
+      "cpu_s": 0.0055,
+      "max_rss_mib": 20.45,
+      "read_mib": 3.07,
+      "write_mib": 0.0
+    },
+    {
+      "name": "backupcrawl_host",
+      "tests": 32,
+      "wall_s": 0.1123,
+      "cpu_s": 0.0206,
+      "max_rss_mib": 20.45,
+      "read_mib": 6.47,
+      "write_mib": 0.04
+    },
+    {
+      "name": "backupcrawl_plugin_chezmoi",
+      "tests": 49,
+      "wall_s": 0.0267,
+      "cpu_s": 0.0167,
+      "max_rss_mib": 20.45,
+      "read_mib": 2.8,
+      "write_mib": 0.0
+    },
+    {
+      "name": "backupcrawl_plugin_example",
+      "tests": 6,
+      "wall_s": 0.0056,
+      "cpu_s": 0.0056,
+      "max_rss_mib": 20.45,
+      "read_mib": 2.46,
+      "write_mib": 0.0
+    },
+    {
+      "name": "backupcrawl_plugin_git",
+      "tests": 22,
+      "wall_s": 0.0089,
+      "cpu_s": 0.0107,
+      "max_rss_mib": 20.45,
+      "read_mib": 5.1,
+      "write_mib": 0.0
+    },
+    {
+      "name": "backupcrawl_plugin_pacman",
+      "tests": 30,
+      "wall_s": 0.007,
+      "cpu_s": 0.0105,
+      "max_rss_mib": 20.45,
+      "read_mib": 2.7,
+      "write_mib": 0.0
+    },
+    {
+      "name": "backupcrawl_plugin_sdk",
+      "tests": 7,
+      "wall_s": 0.0029,
+      "cpu_s": 0.003,
+      "max_rss_mib": 20.45,
+      "read_mib": 1.48,
+      "write_mib": 0.0
+    },
+    {
+      "name": "backupcrawl_plugin_syncthing",
+      "tests": 45,
+      "wall_s": 0.0042,
+      "cpu_s": 0.0099,
+      "max_rss_mib": 20.45,
+      "read_mib": 1.67,
+      "write_mib": 0.0
+    },
+    {
+      "name": "backupcrawl_test_components",
+      "tests": 0,
+      "wall_s": 0.0041,
+      "cpu_s": 0.0035,
+      "max_rss_mib": 20.45,
+      "read_mib": 2.38,
+      "write_mib": 0.0
+    },
+    {
+      "name": "backupcrawl_wit",
+      "tests": 1,
+      "wall_s": 0.0071,
+      "cpu_s": 0.0065,
+      "max_rss_mib": 20.45,
+      "read_mib": 3.02,
+      "write_mib": 0.0
+    },
+    {
+      "name": "chezmoi_plugin",
+      "tests": 10,
+      "wall_s": 0.0651,
+      "cpu_s": 0.2334,
+      "max_rss_mib": 36.27,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "cli",
+      "tests": 30,
+      "wall_s": 2.6625,
+      "cpu_s": 4.5413,
+      "max_rss_mib": 117.98,
+      "read_mib": 0.16,
+      "write_mib": 0.0
+    },
+    {
+      "name": "detector_walker",
+      "tests": 17,
+      "wall_s": 0.0151,
+      "cpu_s": 0.0114,
+      "max_rss_mib": 20.45,
+      "read_mib": 3.13,
+      "write_mib": 0.0
+    },
+    {
+      "name": "discovery",
+      "tests": 12,
+      "wall_s": 0.0039,
+      "cpu_s": 0.0177,
+      "max_rss_mib": 20.45,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "fixture_smoke",
+      "tests": 1,
+      "wall_s": 0.0223,
+      "cpu_s": 0.0222,
+      "max_rss_mib": 32.64,
+      "read_mib": 0.18,
+      "write_mib": 0.04
+    },
+    {
+      "name": "git_plugin",
+      "tests": 23,
+      "wall_s": 0.7518,
+      "cpu_s": 5.7351,
+      "max_rss_mib": 57.86,
+      "read_mib": 0.14,
+      "write_mib": 0.0
+    },
+    {
+      "name": "git_plugin_exec",
+      "tests": 13,
+      "wall_s": 1.2041,
+      "cpu_s": 8.6267,
+      "max_rss_mib": 55.43,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "pacman_plugin",
+      "tests": 13,
+      "wall_s": 0.0528,
+      "cpu_s": 0.2871,
+      "max_rss_mib": 45.86,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "parallel_walker",
+      "tests": 4,
+      "wall_s": 0.1804,
+      "cpu_s": 0.0105,
+      "max_rss_mib": 20.45,
+      "read_mib": 3.21,
+      "write_mib": 0.0
+    },
+    {
+      "name": "runtime",
+      "tests": 16,
+      "wall_s": 0.1447,
+      "cpu_s": 0.3814,
+      "max_rss_mib": 49.94,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "syncthing_plugin",
+      "tests": 6,
+      "wall_s": 0.0324,
+      "cpu_s": 0.0841,
+      "max_rss_mib": 38.77,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "trust",
+      "tests": 15,
+      "wall_s": 0.0023,
+      "cpu_s": 0.0076,
+      "max_rss_mib": 20.45,
+      "read_mib": 0.0,
+      "write_mib": 0.0
+    },
+    {
+      "name": "walker",
+      "tests": 6,
+      "wall_s": 0.0071,
+      "cpu_s": 0.0069,
+      "max_rss_mib": 20.45,
+      "read_mib": 3.34,
+      "write_mib": 0.0
+    }
+  ],
+  "artifacts": {
+    "target_bytes": 12352122335,
+    "wasm": [
+      {
+        "path": "crates/backupcrawl-cli/tests/fixtures/detectors/dotbak/dotbak.wasm",
+        "bytes": 103877
+      },
+      {
+        "path": "crates/backupcrawl-cli/tests/fixtures/plugins/alpha/alpha.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-cli/tests/fixtures/plugins/bad/bad.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-cli/tests/fixtures/plugins/demo/demo.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/explicit/bad-api/bad-api.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/explicit/bad-cap/bad-cap.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/explicit/broken/broken.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/explicit/git/git.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/explicit/just-wasm/just-wasm.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/explicit/unknown-keys/unknown-keys.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/system/chezmoi/chezmoi.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/system/pacman/pacman.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/user/git/git.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/plugins/user/pacman/pacman.wasm",
+        "bytes": 8
+      },
+      {
+        "path": "crates/backupcrawl-host/tests/fixtures/test-detector.wasm",
+        "bytes": 116654
+      },
+      {
+        "path": "plugins/chezmoi/dist/chezmoi.wasm",
+        "bytes": 407050
+      },
+      {
+        "path": "plugins/git/dist/git.wasm",
+        "bytes": 2810754
+      },
+      {
+        "path": "plugins/pacman/dist/pacman.wasm",
+        "bytes": 366799
+      },
+      {
+        "path": "plugins/syncthing/dist/syncthing.wasm",
+        "bytes": 233369
+      }
+    ]
+  }
+}
