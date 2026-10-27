@@ -444,9 +444,12 @@ Caching and cost:
 - Repo status is not persisted across scans (cheap to recompute, correctness matters);
   ignored-file collection only runs when `report-ignored = true` (it costs extra stat work).
 
-Edge cases: repository unreadable or unrecognized → `unknown` attr; repository on a slow/network
-filesystem → per-repo timeout → `unknown`; the exec fallback is additionally disabled when the
-`git` binary is missing.
+Edge cases: a directory whose `.git` is stray or incomplete (a `.git` directory without HEAD, as
+some tool caches leave behind) is not a repository and is left unclaimed, so it falls through to a
+loose path; a repository that looks complete but cannot be read is `unknown` with a one-line
+`reason` attr (the gix error is rendered without its multi-line `Caused by` chain); repository on
+a slow/network filesystem → per-repo timeout → `unknown`; the exec fallback is additionally
+disabled when the `git` binary is missing.
 
 Capabilities: gix backend: `stat` plus `fs-read = ["/"]` (the plugin may need repository data
 above the crawl root for ancestor discovery); the exec fallback adds `exec = ["git"]`.

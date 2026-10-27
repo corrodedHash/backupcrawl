@@ -549,6 +549,20 @@ fn non_repository_paths_are_unclaimed() {
 }
 
 #[test]
+fn incomplete_git_directory_is_unclaimed() {
+    // Tool caches sometimes leave a `.git` directory without HEAD behind. That
+    // is not a repository: claiming it would produce an `unknown` row with a
+    // noisy reason.
+    let fx = Fixture::new();
+    std::fs::create_dir_all(fx.path().join(".git")).unwrap();
+
+    let harness = Harness::new();
+    let mut detector = harness.detector(fx.path(), &[]);
+    assert!(detector.check_dir(fx.path()).unwrap().is_none());
+    assert_eq!(detector.report().errors, 0);
+}
+
+#[test]
 fn submodule_worktree_is_reported_and_a_changed_submodule_is_dirty() {
     let fx = Fixture::new();
     fx.init();

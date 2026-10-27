@@ -37,13 +37,28 @@ pub fn open_options() -> gix::open::Options {
 
 /// Opens exactly the repository at `path` (no upward discovery).
 pub fn open_at(path: &std::path::Path) -> Result<gix::Repository, String> {
-    gix::open_opts(path, open_options()).map_err(|err| format!("cannot open repository: {err:#}"))
+    gix::open_opts(path, open_options()).map_err(|err| reason("cannot open repository", &err))
 }
 
 /// Discovers the repository enclosing `path` by searching upwards.
 pub fn discover_ancestor(path: &std::path::Path) -> Result<gix::Repository, String> {
     gix::discover_opts(path, Default::default(), open_options())
-        .map_err(|err| format!("not inside a git repository: {err:#}"))
+        .map_err(|err| reason("not inside a git repository", &err))
+}
+
+/// Formats a gix error as a one-line `reason` attribute.
+///
+/// gix attaches the full `Caused by` chain to some errors. The JSON output is
+/// one row per entry, so the reason must not contain newlines; the `exec`
+/// backend trims child stderr to its first line for the same reason.
+fn reason(context: &str, err: &impl std::fmt::Display) -> String {
+    let message = err.to_string();
+    let first = message.lines().next().unwrap_or_default().trim();
+    if first.is_empty() {
+        context.to_owned()
+    } else {
+        format!("{context}: {first}")
+    }
 }
 
 /// Inspects an opened repository. Never fails: an error is folded into an
@@ -107,7 +122,7 @@ fn repo_kind(repo: &gix::Repository) -> RepoKind {
 fn read_head(repo: &gix::Repository) -> Result<HeadInfo, String> {
     let head = repo
         .head()
-        .map_err(|err| format!("failed to read HEAD: {err:#}"))?;
+        .map_err(|err| reason("failed to read HEAD", &err))?;
     let (kind, name) = if head.is_unborn() {
         (
             HeadKind::Unborn,
@@ -179,7 +194,7 @@ fn collect_status(
     // to an empty index on an unborn branch.
     let index = repo
         .index_or_empty()
-        .map_err(|err| format!("failed to open index: {err:#}"))?;
+        .map_err(|err| reason("failed to open index", &err))?;
 
     // Conflicts are not reliably part of the status iterator; read them from
     // the index. Porcelain v2 emits one `u` record per conflicted path, while
@@ -195,17 +210,17 @@ fn collect_status(
         .then_some(gix::dir::walk::EmissionMode::Matching);
     let platform = repo
         .status(gix::progress::Discard)
-        .map_err(|err| format!("failed to start status: {err:#}"))?
+        .map_err(|err| reason("failed to start status", &err))?
         .index(index.into())
         .untracked_files(gix::status::UntrackedFiles::Files)
         .dirwalk_options(|options| options.emit_ignored(emit_ignored));
 
     let items = platform
         .into_iter(Vec::<BString>::new())
-        .map_err(|err| format!("failed to iterate status: {err:#}"))?;
+        .map_err(|err| reason("failed to iterate status", &err))?;
 
     for item in items {
-        let item = item.map_err(|err| format!("status iteration failed: {err:#}"))?;
+        let item = item.map_err(|err| reason("status iteration failed", &err))?;
         match item {
             gix::status::Item::TreeIndex(change) => {
                 use gix::diff::index::Change;
@@ -246,4 +261,24 @@ fn collect_status(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reason;
+
+    #[test]
+    fn reason_keeps_only_the_first_line() {
+        struct MultiLine;
+        impl std::fmt::Display for MultiLine {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "outer\n\nCaused by:\n    0: inner")
+            }
+        }
+
+        assert_eq!(
+            reason("failed to iterate status", &MultiLine),
+            "failed to iterate status: outer"
+        );
+    }
 }
