@@ -284,7 +284,7 @@ fn crawl(cli: &Cli) -> Result<()> {
 
     match cli.format {
         Format::Console => printer::print_console(&result, cli.all, &run),
-        Format::Json => printer::print_json(&result)?,
+        Format::Json => printer::print_json(&result, cli.all)?,
     }
     Ok(())
 }

@@ -4,15 +4,15 @@
 //! (styling is disabled automatically when stdout is not a terminal or
 //! `NO_COLOR` is set). The JSON shape is versioned via `"schema": 1`.
 
-use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use console::{measure_text_width, style};
 use serde::Serialize;
 
 use backupcrawl_core::detector::DetectorReport;
-use backupcrawl_core::{CrawlResult, PluginReport, Status};
+use backupcrawl_core::{CrawlResult, PluginReport, Status, SymlinkEntry};
 use backupcrawl_host::discovery::{DiscoveredPlugin, DiscoveryOutcome, PluginSource};
 use backupcrawl_host::fs::FsReadScope;
 use backupcrawl_host::manifest::{Manifest, SUPPORTED_CONTRACT};
@@ -125,35 +125,206 @@ pub fn print_console(result: &CrawlResult, show_all: bool, run: &[PluginRunStatu
 /// Unmanaged links are always shown (`[Unmanaged] path -> target`, with a
 /// `(dangling)` marker); links that are clean because their target lives in a
 /// clean-managed tree (`via`) appear only with `--all`.
+///
+/// Links sharing a directory that holds nothing but links are collapsed into
+/// one row (`[Unmanaged] dir (N links, D dangling)`), because link farms (Steam
+/// prefixes, version managers) otherwise drown every other finding. A group
+/// with a single link, and a directory that also holds unmanaged non-link
+/// paths, stay per-link rows. With `--all` the unmanaged groups are expanded
+/// again; clean (`via`) groups stay summarized so they do not flood the panel
+/// once detectors learn to claim their targets.
 fn symlink_lines(result: &CrawlResult, show_all: bool) -> Vec<String> {
+    let mut lines = Vec::new();
+    for group in group_symlinks(result, show_all) {
+        let expanded = !group.link_only || group.links <= 1 || (show_all && group.via == 0);
+        if expanded {
+            lines.extend(group.members.iter().map(link_line));
+        } else {
+            lines.push(group_line(&group));
+        }
+    }
+    lines
+}
+
+fn link_line(link: &SymlinkEntry) -> String {
+    let label = if link.via.is_some() {
+        "Clean"
+    } else {
+        "Unmanaged"
+    };
+    let dangling = if link.dangling { " (dangling)" } else { "" };
+    format!(
+        "[{label}] {} -> {}{dangling}",
+        link.path.display(),
+        link.target.display()
+    )
+}
+
+fn group_line(group: &SymlinkGroup) -> String {
+    let label = if group.via > 0 { "Clean" } else { "Unmanaged" };
+    let links = if group.links == 1 { "link" } else { "links" };
+    format!(
+        "[{label}] {} ({} {links}, {} dangling)",
+        group.path.display(),
+        thousands(group.links),
+        thousands(group.dangling)
+    )
+}
+
+/// One collapsed row of the symlink panel: the links that live in one
+/// directory. Also the source of the JSON `symlink_groups` entries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymlinkGroup {
+    /// Directory the reported links were grouped under.
+    pub path: PathBuf,
+    /// Number of links represented by this row.
+    pub links: usize,
+    /// How many of those links have a target that does not exist.
+    pub dangling: usize,
+    /// How many of those links are clean because their target lives in a
+    /// managed tree. Groups are category-homogeneous, so this is either `0`
+    /// or equal to `links`.
+    pub via: usize,
+    /// Whether [`path`](Self::path) holds only symlinks and may therefore
+    /// stand for all members. When false the members stay individual rows.
+    pub link_only: bool,
+    /// The grouped links, in crawl (path) order.
+    members: Vec<SymlinkEntry>,
+}
+
+impl SymlinkGroup {
+    fn new(path: PathBuf, link_only: bool) -> Self {
+        Self {
+            path,
+            links: 0,
+            dangling: 0,
+            via: 0,
+            link_only,
+            members: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, link: &SymlinkEntry) {
+        self.links += 1;
+        if link.dangling {
+            self.dangling += 1;
+        }
+        if link.via.is_some() {
+            self.via += 1;
+        }
+        self.members.push(link.clone());
+    }
+}
+
+/// Summarizes the reported links by directory, optionally including the
+/// clean (`via`) links.
+///
+/// A link is grouped under its highest ancestor directory (bounded by the
+/// crawl root) that contains **no unmanaged non-symlink path at or below it**.
+/// "Unmanaged non-symlink" is exactly what lands in `loose_paths` (files no
+/// detector claimed, collapsed bottom-up) or `denied_paths` (unreadable
+/// entries), so a directory holding links next to unmanaged regular files
+/// disqualifies itself and its links stay individual rows. Claimed paths do
+/// not disqualify a directory — they are managed, so a link-only row next to
+/// them is not misleading, and their detail lives in the plugin panels.
+///
+/// Caveat: `loose_paths` is already collapsed, so a loose path can be an
+/// ancestor of a link directory while the actual unmanaged file sits in a
+/// deeper branch. The file is still reported (by that ancestor row); only the
+/// link group's directory may contain something besides links. Sealing that
+/// hole would require the pre-collapse loose entries in [`CrawlResult`].
+pub fn group_symlinks(result: &CrawlResult, show_all: bool) -> Vec<SymlinkGroup> {
+    let dirty = dirty_dirs(result);
+    let mut unmanaged: BTreeMap<PathBuf, SymlinkGroup> = BTreeMap::new();
+    let mut clean: BTreeMap<PathBuf, SymlinkGroup> = BTreeMap::new();
+
+    for link in &result.symlinks {
+        if link.via.is_some() && !show_all {
+            continue;
+        }
+        let path = group_path(&link.path, &result.root, &dirty);
+        let link_only = !dirty.contains(&path);
+        let groups = if link.via.is_some() {
+            &mut clean
+        } else {
+            &mut unmanaged
+        };
+        groups
+            .entry(path.clone())
+            .or_insert_with(|| SymlinkGroup::new(path, link_only))
+            .push(link);
+    }
+
+    let mut groups: Vec<SymlinkGroup> =
+        unmanaged.into_values().chain(clean.into_values()).collect();
+    groups.sort_by(|left, right| left.path.cmp(&right.path).then(left.via.cmp(&right.via)));
+    groups
+}
+
+/// Every unmanaged non-symlink path plus all of its ancestors.
+///
+/// A directory is link-only exactly when it is absent from this set: the set
+/// contains a directory if, and only if, a loose or denied path is at or below
+/// that directory.
+fn dirty_dirs(result: &CrawlResult) -> BTreeSet<PathBuf> {
     result
-        .symlinks
+        .loose_paths
         .iter()
-        .filter(|link| show_all || link.via.is_none())
-        .map(|link| {
-            let label = if link.via.is_some() {
-                "Clean"
-            } else {
-                "Unmanaged"
-            };
-            let dangling = if link.dangling { " (dangling)" } else { "" };
-            format!(
-                "[{label}] {} -> {}{dangling}",
-                link.path.display(),
-                link.target.display()
-            )
-        })
+        .chain(result.denied_paths.iter())
+        .flat_map(|path| path.ancestors())
+        .map(Path::to_path_buf)
         .collect()
 }
 
+/// The directory a link is grouped under: its parent, raised through the
+/// chain of link-only ancestors, stopping at the crawl root or below the
+/// first directory that holds an unmanaged non-link path.
+fn group_path(link: &Path, root: &Path, dirty: &BTreeSet<PathBuf>) -> PathBuf {
+    let mut key = link
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| root.to_path_buf());
+    while !dirty.contains(&key) {
+        let Some(parent) = key.parent() else { break };
+        if dirty.contains(parent) || !parent.starts_with(root) {
+            break;
+        }
+        key = parent.to_path_buf();
+    }
+    key
+}
+
+/// Formats a count with thousands separators, so large link farms stay
+/// readable (`26,320` instead of `26320`).
+fn thousands(value: usize) -> String {
+    let digits = value.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
 /// Prints the crawl result as versioned JSON.
-pub fn print_json(result: &CrawlResult) -> Result<()> {
-    let output = JsonOutput {
-        schema: SCHEMA_VERSION,
-        root: &result.root,
-        not_backed_up: display_paths(&result.loose_paths),
-        permission_denied: display_paths(&result.denied_paths),
-        symlinks: result
+///
+/// The default output is compact: links are summarized per directory in
+/// `symlink_groups`, and the exact per-link `symlinks` array is only emitted
+/// with `--all`.
+pub fn print_json(result: &CrawlResult, show_all: bool) -> Result<()> {
+    let symlink_groups = group_symlinks(result, show_all)
+        .into_iter()
+        .map(|group| JsonSymlinkGroup {
+            path: group.path.display().to_string(),
+            links: group.links,
+            dangling: group.dangling,
+            via: group.via,
+        })
+        .collect();
+    let symlinks = show_all.then(|| {
+        result
             .symlinks
             .iter()
             .map(|link| JsonSymlink {
@@ -162,7 +333,15 @@ pub fn print_json(result: &CrawlResult) -> Result<()> {
                 dangling: link.dangling,
                 via: link.via.as_ref().map(|via| via.display().to_string()),
             })
-            .collect(),
+            .collect()
+    });
+    let output = JsonOutput {
+        schema: SCHEMA_VERSION,
+        root: &result.root,
+        not_backed_up: display_paths(&result.loose_paths),
+        permission_denied: display_paths(&result.denied_paths),
+        symlink_groups,
+        symlinks,
         plugins: &result.plugins,
     };
     println!("{}", serde_json::to_string_pretty(&output)?);
@@ -410,12 +589,29 @@ struct JsonOutput<'a> {
     root: &'a PathBuf,
     not_backed_up: Vec<String>,
     permission_denied: Vec<String>,
-    /// Unmanaged symlinks, always present (empty when there are none).
-    symlinks: Vec<JsonSymlink>,
+    /// Compact per-directory summary of the reported links, always present
+    /// (empty when there are none).
+    symlink_groups: Vec<JsonSymlinkGroup>,
+    /// Exact per-link array, only with `--all` (the default report is compact).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    symlinks: Option<Vec<JsonSymlink>>,
     plugins: &'a [PluginReport],
 }
 
-/// One entry of the JSON `symlinks` array.
+/// One entry of the JSON `symlink_groups` array.
+#[derive(Serialize)]
+struct JsonSymlinkGroup {
+    /// Directory the links were grouped under.
+    path: String,
+    /// Number of links in the group.
+    links: usize,
+    /// Number of those links whose target does not exist.
+    dangling: usize,
+    /// Number of those links that are clean via a managed tree.
+    via: usize,
+}
+
+/// One entry of the JSON `symlinks` array (`--all` only).
 #[derive(Serialize)]
 struct JsonSymlink {
     path: String,
@@ -489,5 +685,87 @@ mod tests {
         );
         let widths: Vec<usize> = panel.lines().map(measure_text_width).collect();
         assert_eq!(widths.iter().min(), widths.iter().max());
+    }
+
+    #[test]
+    fn thousands_groups_digits() {
+        assert_eq!(thousands(0), "0");
+        assert_eq!(thousands(999), "999");
+        assert_eq!(thousands(1_000), "1,000");
+        assert_eq!(thousands(26_320), "26,320");
+        assert_eq!(thousands(1_234_567), "1,234,567");
+    }
+
+    fn link(root: &Path, relative: &str) -> SymlinkEntry {
+        SymlinkEntry {
+            path: root.join(relative),
+            target: root.join("target"),
+            dangling: false,
+            via: None,
+        }
+    }
+
+    fn crawl(root: &Path, loose: &[&str], links: Vec<SymlinkEntry>) -> CrawlResult {
+        CrawlResult {
+            root: root.to_path_buf(),
+            loose_paths: loose.iter().map(|path| root.join(path)).collect(),
+            denied_paths: Vec::new(),
+            symlinks: links,
+            plugins: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn groups_climb_to_the_highest_link_only_directory() {
+        let root = Path::new("/scan");
+        let mut first = link(root, "a/b/c/link-1");
+        first.dangling = true;
+        let result = crawl(root, &["keep.txt"], vec![first, link(root, "a/b/link-2")]);
+
+        let groups = group_symlinks(&result, false);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].path, root.join("a"));
+        assert_eq!(groups[0].links, 2);
+        assert_eq!(groups[0].dangling, 1);
+        assert!(groups[0].link_only);
+    }
+
+    #[test]
+    fn groups_stop_at_mixed_directories() {
+        let root = Path::new("/scan");
+        let result = crawl(
+            root,
+            &["mixed/regular.txt"],
+            vec![link(root, "mixed/link-1"), link(root, "mixed/link-2")],
+        );
+
+        let groups = group_symlinks(&result, false);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].path, root.join("mixed"));
+        assert_eq!(groups[0].links, 2);
+        assert!(!groups[0].link_only);
+    }
+
+    #[test]
+    fn clean_links_are_grouped_only_with_all() {
+        let root = Path::new("/scan");
+        let mut clean = link(root, "farm/link-1");
+        clean.via = Some(root.join("target"));
+        let result = crawl(
+            root,
+            &[],
+            vec![clean.clone(), {
+                let mut other = clean;
+                other.path = root.join("farm/link-2");
+                other
+            }],
+        );
+
+        assert!(group_symlinks(&result, false).is_empty());
+        let groups = group_symlinks(&result, true);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].links, 2);
+        assert_eq!(groups[0].via, 2);
+        assert!(groups[0].link_only);
     }
 }
