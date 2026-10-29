@@ -88,10 +88,39 @@ Console output shows per-plugin panels (Dirty / Unsynced / Unknown, plus Clean
 with `--all`), the "Not backed up" and "Permission denied" panels, and a
 "Symlinks" panel for links no detector claimed (with a `(dangling)` marker;
 links whose target is in a clean-managed tree show up as clean with `--all`).
-JSON output is versioned (`"schema": 1`) and carries the same data in the
+A final `plugins: git ok, ...` line summarizes each detector's fate.
+
+JSON output is versioned (`"schema": 2`) and carries the same data in the
 `not_backed_up`, `permission_denied`, `symlinks` (`path`, `target`, `dangling`,
-optional `via`) and `plugins` arrays. A final `plugins: git ok, ...` line
-summarizes each detector's fate.
+optional `via`) and `plugins` arrays. As on the console, clean claims and
+via-clean symlinks are listed only with `--all`, so the default report of a
+full `/` scan stays bounded instead of serializing every package-owned path.
+Each plugin object always carries a `counts` object describing all claims
+(`clean`, `dirty`, `ahead`, `unknown`, `ignored`), whether or not the clean
+entries themselves are included:
+
+    {
+      "schema": 2,
+      "root": "/",
+      "not_backed_up": ["/home/u/notes.txt"],
+      "permission_denied": [],
+      "symlinks": [
+        { "path": "/usr/bin/awk", "target": "/usr/bin/gawk", "dangling": false }
+      ],
+      "plugins": [
+        {
+          "plugin": "pacman",
+          "counts": { "clean": 185393, "dirty": 0, "ahead": 0, "unknown": 0, "ignored": 0 },
+          "errors": 0,
+          "notes": [],
+          "entries": []
+        }
+      ]
+    }
+
+With `--all`, `entries` also carries the clean claims and `symlinks` also
+carries the via-clean links (the latter with a `via` field naming the target
+inside the clean-managed tree).
 
 ## Plugins
 

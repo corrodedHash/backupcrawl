@@ -86,7 +86,7 @@ fn reports_loose_paths_as_versioned_json() {
 
     let json = run_json(root, &[std::ffi::OsStr::new("--no-plugins")]);
 
-    assert_eq!(json["schema"], 1);
+    assert_eq!(json["schema"], 2);
     assert_eq!(json["root"], root.to_str().unwrap());
     let loose = loose_paths(&json);
     assert!(loose.contains(&root.join("a.txt").display().to_string()));
@@ -677,6 +677,24 @@ fn crawl_fixture(root: &Path, xdg: &Path, extra: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
+/// Runs the dotbak fixture in JSON mode and parses stdout.
+fn crawl_fixture_json_value(root: &Path, xdg: &Path, extra: &[&str]) -> Value {
+    let output = crawl_command(xdg)
+        .arg(root)
+        .args(["--format", "json", "--plugin-dir"])
+        .arg(detectors_fixture_dir())
+        .args(["--plugins", "dotbak", "--trust-plugin", "dotbak"])
+        .args(extra)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
 #[test]
 fn crawl_runs_a_fixture_detector_and_prints_panels_and_run_line() {
     let tmp = tempfile::tempdir().unwrap();
@@ -725,39 +743,52 @@ fn crawl_json_carries_per_plugin_entries_and_attrs() {
     fixture_tree(&root);
     let xdg = tempfile::tempdir().unwrap();
 
-    let output = crawl_command(xdg.path())
-        .arg(&root)
-        .args(["--format", "json", "--plugin-dir"])
-        .arg(detectors_fixture_dir())
-        .args(["--trust-plugin", "dotbak", "--plugins", "dotbak"])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let json = crawl_fixture_json_value(&root, xdg.path(), &[]);
 
-    assert_eq!(json["schema"], 1);
+    assert_eq!(json["schema"], 2);
     let plugins = json["plugins"].as_array().unwrap();
     assert_eq!(plugins.len(), 1, "{json:#}");
     assert_eq!(plugins[0]["plugin"], "dotbak");
 
+    // Default JSON is actionable only: the dirty file claim is serialized, the
+    // clean `marked` directory claim is counted but not included.
     let entries = plugins[0]["entries"].as_array().unwrap();
-    let dirty = entries
-        .iter()
-        .find(|entry| entry["status"] == "dirty")
-        .expect("dirty entry");
-    assert!(dirty["path"].as_str().unwrap().ends_with("notes.txt.bak"));
-    assert_eq!(dirty["attrs"]["reason"], "backup-suffix");
+    assert_eq!(entries.len(), 1, "{json:#}");
+    assert_eq!(entries[0]["status"], "dirty");
+    assert!(
+        entries[0]["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("notes.txt.bak")
+    );
+    assert_eq!(entries[0]["attrs"]["reason"], "backup-suffix");
 
-    let clean = entries
+    let counts = &plugins[0]["counts"];
+    assert_eq!(counts["clean"], 1, "{json:#}");
+    assert_eq!(counts["dirty"], 1, "{json:#}");
+    assert_eq!(counts["ahead"], 0, "{json:#}");
+    assert_eq!(counts["unknown"], 0, "{json:#}");
+    assert_eq!(counts["ignored"], 0, "{json:#}");
+
+    // `--all` adds the clean claim; the counts are unchanged.
+    let all = crawl_fixture_json_value(&root, xdg.path(), &["--all"]);
+    let all_plugin = &all["plugins"][0];
+    assert_eq!(&all_plugin["counts"], counts, "{all:#}");
+    let all_entries = all_plugin["entries"].as_array().unwrap();
+    let clean = all_entries
         .iter()
         .find(|entry| entry["status"] == "clean")
         .expect("clean entry");
     assert!(clean["path"].as_str().unwrap().ends_with("/marked"));
     assert_eq!(clean["attrs"]["marker"], ".dotbak");
+    assert_eq!(
+        all_entries
+            .iter()
+            .filter(|entry| entry["status"] == "dirty")
+            .count(),
+        1,
+        "{all:#}"
+    );
 
     let loose = loose_paths(&json);
     assert!(loose.contains(&root.join("plain.txt").display().to_string()));
@@ -766,6 +797,107 @@ fn crawl_json_carries_per_plugin_entries_and_attrs() {
         !loose.iter().any(|path| path.ends_with("inner.txt")),
         "pruned subtree leaked into loose paths: {loose:?}"
     );
+}
+
+/// Runs `git` in `cwd` with a hermetic environment (no system/global config,
+/// fixed identity) and panics on failure.
+fn git_in(cwd: &Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "cli-test")
+        .env("GIT_AUTHOR_EMAIL", "cli-test@example.com")
+        .env("GIT_AUTHOR_DATE", "2020-01-01T00:00:00+00:00")
+        .env("GIT_COMMITTER_NAME", "cli-test")
+        .env("GIT_COMMITTER_EMAIL", "cli-test@example.com")
+        .env("GIT_COMMITTER_DATE", "2020-01-01T00:00:00+00:00")
+        .output()
+        .expect("spawn git");
+    assert!(
+        output.status.success(),
+        "git {args:?} in {} failed:\n{}",
+        cwd.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn json_default_omits_clean_git_claims_but_counts_them() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    fs::create_dir_all(&root).unwrap();
+    git_in(&root, &["init", "-q", "-b", "main"]);
+    touch(&root.join("tracked.txt"));
+    git_in(&root, &["add", "-A"]);
+    git_in(&root, &["commit", "-qm", "initial"]);
+
+    // A clean repository needs an upstream; the bare remote lives outside the
+    // scanned worktree so it cannot show up as an untracked entry.
+    let remote = tmp.path().join("remote.git");
+    git_in(
+        &root,
+        &[
+            "init",
+            "--bare",
+            "-q",
+            "-b",
+            "main",
+            remote.to_str().unwrap(),
+        ],
+    );
+    git_in(
+        &root,
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+    );
+    git_in(&root, &["push", "-q", "-u", "origin", "main"]);
+
+    let xdg = tempfile::tempdir().unwrap();
+    let run = |extra: &[&str]| -> Value {
+        let output = crawl_command(xdg.path())
+            .arg(&root)
+            .args(["--format", "json", "--plugins", "git"])
+            .args(extra)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+
+    let json = run(&[]);
+    assert_eq!(json["schema"], 2);
+    let plugin = &json["plugins"][0];
+    assert_eq!(plugin["plugin"], "git");
+    // The clean repository claim is counted but not serialized by default.
+    assert_eq!(plugin["counts"]["clean"], 1, "{json:#}");
+    assert_eq!(plugin["counts"]["dirty"], 0, "{json:#}");
+    assert!(plugin["entries"].as_array().unwrap().is_empty(), "{json:#}");
+
+    // `--all` serializes the same claim; the counts are identical.
+    let all = run(&["--all"]);
+    let all_plugin = &all["plugins"][0];
+    assert_eq!(&all_plugin["counts"], &plugin["counts"], "{all:#}");
+    let entries = all_plugin["entries"].as_array().unwrap();
+    assert_eq!(
+        entries.len(),
+        plugin["counts"]["clean"].as_u64().unwrap() as usize,
+        "{all:#}"
+    );
+    assert!(
+        entries.iter().all(|entry| entry["status"] == "clean"),
+        "{all:#}"
+    );
+    let root_entry = entries
+        .iter()
+        .find(|entry| entry["path"] == root.display().to_string())
+        .expect("repository root claim");
+    assert_eq!(root_entry["attrs"]["branch"], "main", "{all:#}");
+    assert_eq!(root_entry["attrs"]["upstream"], "origin/main", "{all:#}");
 }
 
 #[test]
@@ -976,7 +1108,7 @@ fn jobs_4_produces_identical_json_to_jobs_1() {
         "JSON output must not depend on the worker count"
     );
     let json: Value = serde_json::from_slice(&parallel).unwrap();
-    assert_eq!(json["schema"], 1);
+    assert_eq!(json["schema"], 2);
 }
 
 #[test]
@@ -1042,7 +1174,7 @@ fn progress_with_json_does_not_corrupt_stdout() {
     assert!(output.stderr.is_empty());
     assert!(!String::from_utf8_lossy(&output.stdout).contains("walking:"));
     let json: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(json["schema"], 1);
+    assert_eq!(json["schema"], 2);
     assert!(loose_paths(&json).contains(&root.join("a.txt").display().to_string()));
 }
 
@@ -1056,22 +1188,19 @@ fn symlinks_into_a_clean_pruning_claim_are_via_clean() {
     symlink(root.join("farm/real.txt"), root.join("link.txt"));
     let xdg = tempfile::tempdir().unwrap();
 
-    let output = crawl_command(xdg.path())
-        .arg(&root)
-        .args(["--format", "json", "--plugin-dir"])
-        .arg(detectors_fixture_dir())
-        .args(["--plugins", "dotbak", "--trust-plugin", "dotbak"])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    // Default JSON hides the via-clean link, like the console panel.
+    let json = crawl_fixture_json_value(&root, xdg.path(), &[]);
+    assert!(json["symlinks"].as_array().unwrap().is_empty(), "{json:#}");
 
-    let symlinks = json["symlinks"].as_array().unwrap();
-    assert_eq!(symlinks.len(), 1, "{json:#}");
+    // `--all` includes it with the target it is clean through; the counts do
+    // not depend on `--all`.
+    let all_json = crawl_fixture_json_value(&root, xdg.path(), &["--all"]);
+    assert_eq!(
+        &all_json["plugins"][0]["counts"], &json["plugins"][0]["counts"],
+        "{all_json:#}"
+    );
+    let symlinks = all_json["symlinks"].as_array().unwrap();
+    assert_eq!(symlinks.len(), 1, "{all_json:#}");
     assert_eq!(
         symlinks[0]["via"].as_str().unwrap(),
         root.join("farm/real.txt").display().to_string()

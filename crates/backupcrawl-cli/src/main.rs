@@ -42,7 +42,8 @@ struct Cli {
     #[arg(long, short, value_enum, default_value_t = Format::Console)]
     format: Format,
 
-    /// Also show clean (backed-up) claims in the panels.
+    /// Also show clean (backed-up) claims and clean symlinks in the panels and
+    /// JSON.
     #[arg(long, short)]
     all: bool,
 
@@ -284,7 +285,7 @@ fn crawl(cli: &Cli) -> Result<()> {
 
     match cli.format {
         Format::Console => printer::print_console(&result, cli.all, &run),
-        Format::Json => printer::print_json(&result)?,
+        Format::Json => printer::print_json(&result, cli.all)?,
     }
     Ok(())
 }

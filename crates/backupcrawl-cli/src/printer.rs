@@ -2,7 +2,7 @@
 //!
 //! Console rendering is hand-rolled box drawing on top of the `console` crate
 //! (styling is disabled automatically when stdout is not a terminal or
-//! `NO_COLOR` is set). The JSON shape is versioned via `"schema": 1`.
+//! `NO_COLOR` is set). The JSON shape is versioned via `"schema": 2`.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -12,7 +12,7 @@ use console::{measure_text_width, style};
 use serde::Serialize;
 
 use backupcrawl_core::detector::DetectorReport;
-use backupcrawl_core::{CrawlResult, PluginReport, Status};
+use backupcrawl_core::{CrawlResult, Entry, PluginReport, Status};
 use backupcrawl_host::discovery::{DiscoveredPlugin, DiscoveryOutcome, PluginSource};
 use backupcrawl_host::fs::FsReadScope;
 use backupcrawl_host::manifest::{Manifest, SUPPORTED_CONTRACT};
@@ -21,7 +21,11 @@ use backupcrawl_host::trust::{PluginTrust, TrustState};
 use crate::config::PluginsConfig;
 
 /// Version of the JSON output schema.
-pub const SCHEMA_VERSION: u32 = 1;
+///
+/// Schema 2 added per-plugin status `counts` and made the `symlinks` and
+/// per-plugin `entries` arrays respect `--all`: clean claims and symlinks whose
+/// target lives in a clean-managed tree are omitted unless `--all` is given.
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Run-time status of one detector, rendered in the `plugins:` report line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,23 +151,26 @@ fn symlink_lines(result: &CrawlResult, show_all: bool) -> Vec<String> {
 }
 
 /// Prints the crawl result as versioned JSON.
-pub fn print_json(result: &CrawlResult) -> Result<()> {
+///
+/// Like the console panels, the JSON report is actionable by default: clean
+/// claims and symlinks whose target lives in a clean-managed tree (`via`) are
+/// serialized only with `--all`. The per-plugin `counts` object always covers
+/// every claim, so the filtered rows stay visible as numbers. This is what
+/// keeps a full `/` scan bounded: the pacman detector claims every
+/// package-owned path as clean (correctly), and without `--all` none of those
+/// rows reach the output.
+pub fn print_json(result: &CrawlResult, show_all: bool) -> Result<()> {
     let output = JsonOutput {
         schema: SCHEMA_VERSION,
         root: &result.root,
         not_backed_up: display_paths(&result.loose_paths),
         permission_denied: display_paths(&result.denied_paths),
-        symlinks: result
-            .symlinks
+        symlinks: json_symlinks(result, show_all),
+        plugins: result
+            .plugins
             .iter()
-            .map(|link| JsonSymlink {
-                path: link.path.display().to_string(),
-                target: link.target.display().to_string(),
-                dangling: link.dangling,
-                via: link.via.as_ref().map(|via| via.display().to_string()),
-            })
+            .map(|report| JsonPlugin::new(report, show_all))
             .collect(),
-        plugins: &result.plugins,
     };
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
@@ -410,9 +417,83 @@ struct JsonOutput<'a> {
     root: &'a PathBuf,
     not_backed_up: Vec<String>,
     permission_denied: Vec<String>,
-    /// Unmanaged symlinks, always present (empty when there are none).
+    /// Symlinks; unmanaged ones are always present, via-clean ones only with
+    /// `--all` (empty array when there are none).
     symlinks: Vec<JsonSymlink>,
-    plugins: &'a [PluginReport],
+    plugins: Vec<JsonPlugin<'a>>,
+}
+
+/// One entry of the JSON `plugins` array (schema 2).
+///
+/// `entries` is filtered by `--all`; `counts` always describes all claims.
+#[derive(Serialize)]
+struct JsonPlugin<'a> {
+    plugin: &'a str,
+    counts: JsonCounts,
+    errors: u32,
+    notes: &'a [String],
+    entries: Vec<&'a Entry>,
+}
+
+impl<'a> JsonPlugin<'a> {
+    fn new(report: &'a PluginReport, show_all: bool) -> Self {
+        Self {
+            plugin: &report.plugin,
+            counts: plugin_counts(report),
+            errors: report.errors,
+            notes: &report.notes,
+            entries: json_entries(report, show_all),
+        }
+    }
+}
+
+/// Per-status claim counts of one detector, independent of `--all`.
+#[derive(Debug, Default, Serialize)]
+struct JsonCounts {
+    clean: usize,
+    dirty: usize,
+    ahead: usize,
+    unknown: usize,
+    ignored: usize,
+}
+
+/// Counts every claim in `report`, including the clean ones hidden by default.
+fn plugin_counts(report: &PluginReport) -> JsonCounts {
+    let mut counts = JsonCounts::default();
+    for entry in &report.entries {
+        match entry.status {
+            Status::Clean => counts.clean += 1,
+            Status::Dirty => counts.dirty += 1,
+            Status::Ahead => counts.ahead += 1,
+            Status::Unknown => counts.unknown += 1,
+            Status::Ignored => counts.ignored += 1,
+        }
+    }
+    counts
+}
+
+/// The entries of `report` worth serializing; clean claims need `--all`.
+fn json_entries(report: &PluginReport, show_all: bool) -> Vec<&Entry> {
+    report
+        .entries
+        .iter()
+        .filter(|entry| show_all || entry.status != Status::Clean)
+        .collect()
+}
+
+/// The symlinks worth serializing; via-clean links need `--all`.
+fn json_symlinks(result: &CrawlResult, show_all: bool) -> Vec<JsonSymlink> {
+    result
+        .symlinks
+        .iter()
+        .filter(|link| show_all || link.via.is_none())
+        .map(|link| JsonSymlink {
+            path: link.path.display().to_string(),
+            target: link.target.display().to_string(),
+            dangling: link.dangling,
+            via: link.via.as_ref().map(|via| via.display().to_string()),
+        })
+        .collect()
 }
 
 /// One entry of the JSON `symlinks` array.
