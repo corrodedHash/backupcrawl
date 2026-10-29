@@ -867,14 +867,20 @@ fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) {
 
 #[cfg(unix)]
 #[test]
-fn crawl_json_reports_unmanaged_symlinks() {
+fn crawl_json_reports_unmanaged_symlinks_with_all() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("tree");
     touch(&root.join("real.txt"));
     symlink(root.join("real.txt"), root.join("link.txt"));
     symlink("missing.txt", root.join("broken.txt"));
 
-    let json = run_json(&root, &[std::ffi::OsStr::new("--no-plugins")]);
+    let json = run_json(
+        &root,
+        &[
+            std::ffi::OsStr::new("--no-plugins"),
+            std::ffi::OsStr::new("--all"),
+        ],
+    );
 
     let symlinks = json["symlinks"].as_array().unwrap();
     assert_eq!(symlinks.len(), 2, "{json:#}");
@@ -895,6 +901,43 @@ fn crawl_json_reports_unmanaged_symlinks() {
         root.join("real.txt").display().to_string()
     );
     assert_eq!(link["dangling"], false);
+}
+
+#[cfg(unix)]
+#[test]
+fn crawl_json_groups_symlinks_by_default_and_all_expands_them() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("tree");
+    touch(&root.join("real.txt"));
+    symlink(root.join("real.txt"), root.join("farm/link-1.txt"));
+    symlink(root.join("real.txt"), root.join("farm/link-2.txt"));
+    symlink("missing.txt", root.join("farm/broken.txt"));
+
+    let compact = run_json(&root, &[std::ffi::OsStr::new("--no-plugins")]);
+    assert!(
+        compact.get("symlinks").is_none(),
+        "the default JSON is compact: {compact:#}"
+    );
+    let groups = compact["symlink_groups"].as_array().unwrap();
+    assert_eq!(groups.len(), 1, "{compact:#}");
+    assert_eq!(
+        groups[0]["path"].as_str().unwrap(),
+        root.join("farm").display().to_string()
+    );
+    assert_eq!(groups[0]["links"], 3);
+    assert_eq!(groups[0]["dangling"], 1);
+    assert_eq!(groups[0]["via"], 0);
+
+    let all = run_json(
+        &root,
+        &[
+            std::ffi::OsStr::new("--no-plugins"),
+            std::ffi::OsStr::new("--all"),
+        ],
+    );
+    assert_eq!(all["symlinks"].as_array().unwrap().len(), 3, "{all:#}");
+    // The group summary stays present next to the expanded array.
+    assert_eq!(all["symlink_groups"].as_array().unwrap().len(), 1);
 }
 
 #[cfg(unix)]
@@ -935,7 +978,127 @@ fn console_shows_the_symlink_panel_with_unmanaged_links() {
     assert!(!stdout.contains('\u{1b}'), "unexpected ANSI escapes");
 }
 
-// --- parallel crawl and progress (M4a) -------------------------------------
+#[cfg(unix)]
+#[test]
+fn console_collapses_symlink_only_directories() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("tree");
+    touch(&root.join("real.txt"));
+    symlink(root.join("real.txt"), root.join("farm/link-1.txt"));
+    symlink(root.join("real.txt"), root.join("farm/link-2.txt"));
+    symlink(root.join("real.txt"), root.join("farm/link-3.txt"));
+    symlink("missing.txt", root.join("farm/broken.txt"));
+    let xdg = tempfile::tempdir().unwrap();
+
+    let output = crawl_command(xdg.path())
+        .arg(&root)
+        .arg("--no-plugins")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    assert!(
+        stdout.contains(&format!(
+            "[Unmanaged] {} (4 links, 1 dangling)",
+            root.join("farm").display()
+        )),
+        "got:\n{stdout}"
+    );
+    // The exact per-link lines are replaced by the summary row.
+    assert!(
+        !stdout.contains(&format!("{} ->", root.join("farm/link-1.txt").display())),
+        "got:\n{stdout}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn console_all_expands_symlink_groups_again() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("tree");
+    touch(&root.join("real.txt"));
+    symlink(root.join("real.txt"), root.join("farm/link-1.txt"));
+    symlink("missing.txt", root.join("farm/broken.txt"));
+    let xdg = tempfile::tempdir().unwrap();
+
+    let output = crawl_command(xdg.path())
+        .arg(&root)
+        .args(["--all", "--no-plugins"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    assert!(
+        stdout.contains(&format!(
+            "[Unmanaged] {} -> {}",
+            root.join("farm/link-1.txt").display(),
+            root.join("real.txt").display()
+        )),
+        "got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!(
+            "[Unmanaged] {} -> {} (dangling)",
+            root.join("farm/broken.txt").display(),
+            root.join("farm/missing.txt").display()
+        )),
+        "got:\n{stdout}"
+    );
+    assert!(!stdout.contains("(2 links"), "got:\n{stdout}");
+}
+
+#[cfg(unix)]
+#[test]
+fn console_does_not_collapse_a_mixed_directory() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("tree");
+    touch(&root.join("real.txt"));
+    touch(&root.join("mixed/regular.txt"));
+    symlink(root.join("real.txt"), root.join("mixed/link-1.txt"));
+    symlink("missing.txt", root.join("mixed/link-2.txt"));
+    let xdg = tempfile::tempdir().unwrap();
+
+    let output = crawl_command(xdg.path())
+        .arg(&root)
+        .arg("--no-plugins")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    // Both links stay individual lines: the directory also holds a regular
+    // file, so a summary row would hide it behind a "links only" label.
+    assert!(
+        stdout.contains(&format!(
+            "[Unmanaged] {} -> {}",
+            root.join("mixed/link-1.txt").display(),
+            root.join("real.txt").display()
+        )),
+        "got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!(
+            "[Unmanaged] {} -> {} (dangling)",
+            root.join("mixed/link-2.txt").display(),
+            root.join("mixed/missing.txt").display()
+        )),
+        "got:\n{stdout}"
+    );
+    assert!(!stdout.contains("(2 links"), "got:\n{stdout}");
+
+    // Compact JSON still counts both links, grouped under the mixed
+    // directory, so no link is dropped from the summary.
+    let json = run_json(&root, &[std::ffi::OsStr::new("--no-plugins")]);
+    let groups = json["symlink_groups"].as_array().unwrap();
+    let mixed = groups
+        .iter()
+        .find(|group| group["path"] == root.join("mixed").display().to_string())
+        .expect("mixed group");
+    assert_eq!(mixed["links"], 2);
+    assert_eq!(mixed["dangling"], 1);
+}
 
 /// Runs the dotbak fixture in JSON mode at `jobs` and returns stdout.
 fn crawl_fixture_json(root: &Path, xdg: &Path, jobs: &str) -> Vec<u8> {
@@ -1053,12 +1216,14 @@ fn symlinks_into_a_clean_pruning_claim_are_via_clean() {
     let root = tmp.path().join("tree");
     touch(&root.join("farm/.dotbak"));
     touch(&root.join("farm/real.txt"));
-    symlink(root.join("farm/real.txt"), root.join("link.txt"));
+    touch(&root.join("farm/other.txt"));
+    symlink(root.join("farm/real.txt"), root.join("link-1.txt"));
+    symlink(root.join("farm/other.txt"), root.join("link-2.txt"));
     let xdg = tempfile::tempdir().unwrap();
 
     let output = crawl_command(xdg.path())
         .arg(&root)
-        .args(["--format", "json", "--plugin-dir"])
+        .args(["--format", "json", "--all", "--plugin-dir"])
         .arg(detectors_fixture_dir())
         .args(["--plugins", "dotbak", "--trust-plugin", "dotbak"])
         .output()
@@ -1071,13 +1236,40 @@ fn symlinks_into_a_clean_pruning_claim_are_via_clean() {
     let json: Value = serde_json::from_slice(&output.stdout).unwrap();
 
     let symlinks = json["symlinks"].as_array().unwrap();
-    assert_eq!(symlinks.len(), 1, "{json:#}");
+    assert_eq!(symlinks.len(), 2, "{json:#}");
     assert_eq!(
         symlinks[0]["via"].as_str().unwrap(),
         root.join("farm/real.txt").display().to_string()
     );
+    assert_eq!(
+        symlinks[1]["via"].as_str().unwrap(),
+        root.join("farm/other.txt").display().to_string()
+    );
 
-    // Without `--all` the via-clean link is hidden; with `--all` it shows.
+    // The clean links are summarized as one group, so a dotfile farm stays a
+    // single row instead of reappearing link by link.
+    let groups = json["symlink_groups"].as_array().unwrap();
+    assert_eq!(groups.len(), 1, "{json:#}");
+    assert_eq!(
+        groups[0]["path"].as_str().unwrap(),
+        root.display().to_string()
+    );
+    assert_eq!(groups[0]["links"], 2);
+    assert_eq!(groups[0]["dangling"], 0);
+    assert_eq!(groups[0]["via"], 2);
+
+    // Without `--all` the via-clean links are hidden in both outputs.
+    let default_json = crawl_command(xdg.path())
+        .arg(&root)
+        .args(["--format", "json", "--plugin-dir"])
+        .arg(detectors_fixture_dir())
+        .args(["--plugins", "dotbak", "--trust-plugin", "dotbak"])
+        .output()
+        .unwrap();
+    let json: Value = serde_json::from_slice(&default_json.stdout).unwrap();
+    assert!(json["symlink_groups"].as_array().unwrap().is_empty());
+    assert!(json.get("symlinks").is_none());
+
     let default = crawl_command(xdg.path())
         .arg(&root)
         .args(["--plugin-dir"])
@@ -1097,11 +1289,11 @@ fn symlinks_into_a_clean_pruning_claim_are_via_clean() {
         .unwrap();
     let stdout = String::from_utf8(all.stdout).unwrap();
     assert!(
-        stdout.contains(&format!(
-            "[Clean] {} -> {}",
-            root.join("link.txt").display(),
-            root.join("farm/real.txt").display()
-        )),
+        stdout.contains(&format!("[Clean] {} (2 links, 0 dangling)", root.display())),
         "got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains(&format!("{} ->", root.join("link-1.txt").display())),
+        "clean groups stay summarized with --all: {stdout}"
     );
 }

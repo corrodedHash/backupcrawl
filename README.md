@@ -88,9 +88,14 @@ Console output shows per-plugin panels (Dirty / Unsynced / Unknown, plus Clean
 with `--all`), the "Not backed up" and "Permission denied" panels, and a
 "Symlinks" panel for links no detector claimed (with a `(dangling)` marker;
 links whose target is in a clean-managed tree show up as clean with `--all`).
+Links that share a directory holding nothing but links are collapsed into one
+`(N links, D dangling)` row, so link farms (Steam prefixes, version managers)
+stay readable; `--all` expands those rows to the exact per-link lines, while
+clean (`via`) groups stay summarized.
 JSON output is versioned (`"schema": 1`) and carries the same data in the
-`not_backed_up`, `permission_denied`, `symlinks` (`path`, `target`, `dangling`,
-optional `via`) and `plugins` arrays. A final `plugins: git ok, ...` line
+`not_backed_up`, `permission_denied`, `symlink_groups` (`path`, `links`,
+`dangling`, `via`), `symlinks` (`path`, `target`, `dangling`, optional `via`,
+only with `--all`) and `plugins` arrays. A final `plugins: git ok, ...` line
 summarizes each detector's fate.
 
 ## Plugins
