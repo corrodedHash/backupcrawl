@@ -22,33 +22,123 @@
 //! [`gix::Repository`]. The `exec` backend ([`crate::exec`]) mirrors it using
 //! `git status --porcelain=v2` through the host `exec` import (M1.9).
 
-use backupcrawl_plugin_sdk::Status;
+use std::fmt::{Debug, Display};
+use std::path::Path;
+
+use backupcrawl_plugin_sdk::{Host, LogLevel, Status};
 use gix::bstr::BString;
 
 use crate::model::{
     HeadInfo, HeadKind, InspectOptions, RepoInspection, RepoKind, Upstream, finalize,
-    record_head_attrs, record_upstream_attrs, unknown,
+    gitdir_target, record_head_attrs, record_upstream_attrs, unknown,
 };
+use crate::reason;
 
 /// Open options shared by every repository access: WASI has no executable bit.
 pub fn open_options() -> gix::open::Options {
     gix::open::Options::default().config_overrides(["core.fileMode=false".to_owned()])
 }
 
+/// Why a path that looked like a repository could not be opened.
+///
+/// The distinction matters for the report: a stray or incomplete `.git` is not
+/// a repository and must not become an `unknown` row, while a real repository
+/// that merely cannot be read must keep its claim.
+#[derive(Debug)]
+pub struct OpenError {
+    kind: OpenErrorKind,
+    error: gix::Error,
+}
+
+/// The two ways opening a repository can fail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenErrorKind {
+    /// The path is not a usable repository: a stray or incomplete `.git`
+    /// (missing `HEAD`) or a dangling `gitdir:` target. The detector declines
+    /// the claim, so the directory falls through to a loose path.
+    NotARepository,
+    /// A repository that exists but cannot be read (permissions, `OutOfMemory`
+    /// while opening a pack, corruption). The detector keeps the claim and
+    /// reports `unknown` with the reason.
+    Unreadable,
+}
+
+impl OpenError {
+    /// Which kind of failure this is.
+    pub fn kind(&self) -> OpenErrorKind {
+        self.kind
+    }
+
+    /// The one-line `unknown` reason for the claim.
+    pub fn reason(&self) -> String {
+        reason::one_line(format!("cannot open repository: {}", self.error))
+    }
+
+    /// The full gix cause chain, for the debug log.
+    pub fn chain(&self) -> String {
+        format!("{:?}", self.error)
+    }
+}
+
 /// Opens exactly the repository at `path` (no upward discovery).
-pub fn open_at(path: &std::path::Path) -> Result<gix::Repository, String> {
-    gix::open_opts(path, open_options()).map_err(|err| format!("cannot open repository: {err:#}"))
+pub fn open_at(path: &Path) -> Result<gix::Repository, OpenError> {
+    gix::open_opts(path, open_options()).map_err(|error| {
+        // gix reports an unreadable `.git` exactly like a stray one ("does not
+        // appear to be a git repository"), so probe the layout before deciding
+        // that there is nothing to claim.
+        let kind = if error.is_not_found() && !unreadable_repository(path) {
+            OpenErrorKind::NotARepository
+        } else {
+            OpenErrorKind::Unreadable
+        };
+        OpenError { kind, error }
+    })
+}
+
+/// Whether a failed open is about a repository we may not read rather than
+/// about a path that is not a repository.
+///
+/// A permission problem on `.git` (or on a linked worktree's `gitdir:` target,
+/// or on a bare repository's `HEAD`) makes gix return the same not-found error
+/// as a stray `.git`, dropping the permission detail. A repository whose `HEAD`
+/// we cannot stat is kept as `unknown`; one without a `HEAD` is declined.
+fn unreadable_repository(path: &Path) -> bool {
+    fn denied(error: &std::io::Error) -> bool {
+        error.kind() == std::io::ErrorKind::PermissionDenied
+    }
+    fn head_denied(git_dir: &Path) -> bool {
+        std::fs::symlink_metadata(git_dir.join("HEAD")).is_err_and(|error| denied(&error))
+    }
+
+    let dotgit = path.join(".git");
+    match std::fs::symlink_metadata(&dotgit) {
+        // No `.git` at all: the path was claimed as a bare repository, which
+        // `is_repo_root` only accepts when it has the full layout.
+        Err(error) => denied(&error) || crate::is_bare_layout(path),
+        Ok(meta) if meta.is_dir() => head_denied(&dotgit),
+        Ok(_) => match std::fs::read_to_string(&dotgit) {
+            Err(error) => denied(&error),
+            Ok(contents) => {
+                gitdir_target(path, &contents).is_some_and(|git_dir| head_denied(&git_dir))
+            }
+        },
+    }
 }
 
 /// Discovers the repository enclosing `path` by searching upwards.
-pub fn discover_ancestor(path: &std::path::Path) -> Result<gix::Repository, String> {
+pub fn discover_ancestor(path: &Path) -> Result<gix::Repository, String> {
     gix::discover_opts(path, Default::default(), open_options())
-        .map_err(|err| format!("not inside a git repository: {err:#}"))
+        .map_err(|err| format!("not inside a git repository: {}", reason::one_line(err)))
 }
 
 /// Inspects an opened repository. Never fails: an error is folded into an
-/// `unknown` verdict with a `reason` attribute, as §7.1 requires.
-pub fn inspect(repo: &gix::Repository, opts: &InspectOptions) -> RepoInspection {
+/// `unknown` verdict with a one-line `reason` attribute, as §7.1 requires. The
+/// full cause chain is logged at debug level (`-vv`).
+pub fn inspect(
+    repo: &gix::Repository,
+    opts: &InspectOptions,
+    host: &mut dyn Host,
+) -> RepoInspection {
     let mut inspection = RepoInspection {
         workdir: repo.workdir().map(std::path::Path::to_path_buf),
         git_dir: repo.git_dir().to_path_buf(),
@@ -70,7 +160,7 @@ pub fn inspect(repo: &gix::Repository, opts: &InspectOptions) -> RepoInspection 
             .push(backupcrawl_plugin_sdk::Attr::new("bare", "true"));
     }
 
-    let head = match read_head(repo) {
+    let head = match read_head(repo, host) {
         Ok(head) => head,
         Err(reason) => return unknown(inspection, reason),
     };
@@ -88,12 +178,28 @@ pub fn inspect(repo: &gix::Repository, opts: &InspectOptions) -> RepoInspection 
         record_upstream_attrs(&mut inspection.attrs, upstream);
     }
 
-    if let Err(reason) = collect_status(repo, opts, &mut inspection) {
+    if let Err(reason) = collect_status(repo, opts, &mut inspection, host) {
         return unknown(inspection, reason);
     }
 
     finalize(opts, &head, upstream.as_ref(), &mut inspection);
     inspection
+}
+
+/// The path named in error reasons: the worktree root, or the git dir for a
+/// bare repository.
+fn repo_path(repo: &gix::Repository) -> &Path {
+    repo.workdir().unwrap_or_else(|| repo.git_dir())
+}
+
+/// Builds a one-line `unknown` reason and logs the full cause chain at debug
+/// level (`-vv`), where it stays available without polluting the report.
+fn failure(host: &mut dyn Host, path: &Path, context: &str, err: impl Display + Debug) -> String {
+    host.log(
+        LogLevel::Debug,
+        &format!("git: {context} at {}: {err:?}", path.display()),
+    );
+    format!("{context}: {}", reason::one_line(err))
 }
 
 fn repo_kind(repo: &gix::Repository) -> RepoKind {
@@ -104,10 +210,11 @@ fn repo_kind(repo: &gix::Repository) -> RepoKind {
     }
 }
 
-fn read_head(repo: &gix::Repository) -> Result<HeadInfo, String> {
+fn read_head(repo: &gix::Repository, host: &mut dyn Host) -> Result<HeadInfo, String> {
+    let path = repo_path(repo);
     let head = repo
         .head()
-        .map_err(|err| format!("failed to read HEAD: {err:#}"))?;
+        .map_err(|err| failure(host, path, "failed to read HEAD", &err))?;
     let (kind, name) = if head.is_unborn() {
         (
             HeadKind::Unborn,
@@ -173,13 +280,15 @@ fn collect_status(
     repo: &gix::Repository,
     opts: &InspectOptions,
     inspection: &mut RepoInspection,
+    host: &mut dyn Host,
 ) -> Result<(), String> {
+    let path = repo_path(repo);
     // gix opens and checksum-verifies `.git/index` itself (mmap through the
     // vendored shim, timestamps through the vendored `filetime`) and falls back
     // to an empty index on an unborn branch.
     let index = repo
         .index_or_empty()
-        .map_err(|err| format!("failed to open index: {err:#}"))?;
+        .map_err(|err| failure(host, path, "failed to open index", &err))?;
 
     // Conflicts are not reliably part of the status iterator; read them from
     // the index. Porcelain v2 emits one `u` record per conflicted path, while
@@ -195,17 +304,17 @@ fn collect_status(
         .then_some(gix::dir::walk::EmissionMode::Matching);
     let platform = repo
         .status(gix::progress::Discard)
-        .map_err(|err| format!("failed to start status: {err:#}"))?
+        .map_err(|err| failure(host, path, "failed to start status", &err))?
         .index(index.into())
         .untracked_files(gix::status::UntrackedFiles::Files)
         .dirwalk_options(|options| options.emit_ignored(emit_ignored));
 
     let items = platform
         .into_iter(Vec::<BString>::new())
-        .map_err(|err| format!("failed to iterate status: {err:#}"))?;
+        .map_err(|err| failure(host, path, "failed to iterate status", &err))?;
 
     for item in items {
-        let item = item.map_err(|err| format!("status iteration failed: {err:#}"))?;
+        let item = item.map_err(|err| failure(host, path, "status iteration failed", &err))?;
         match item {
             gix::status::Item::TreeIndex(change) => {
                 use gix::diff::index::Change;

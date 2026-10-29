@@ -96,6 +96,86 @@ fn reports_loose_paths_as_versioned_json() {
 }
 
 #[test]
+fn stray_git_directory_is_reported_as_a_loose_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    // A `.git` without `HEAD` is not a repository (half-initialised checkout,
+    // vendored tool leftovers). The git detector must decline it so the
+    // directory falls through to "not backed up" instead of an `unknown`
+    // repository row with a multi-line gix error.
+    touch(&root.join("stray/.git/objects/info"));
+    touch(&root.join("stray/data.txt"));
+
+    let json = run_json(root, &[]);
+
+    let git_entries: Vec<&Value> = json["plugins"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|plugin| plugin["plugin"] == "git")
+        .flat_map(|plugin| plugin["entries"].as_array().unwrap())
+        .collect();
+    assert!(
+        git_entries
+            .iter()
+            .all(|entry| !entry["path"].as_str().unwrap().ends_with("/stray")),
+        "a stray .git must not be claimed as a repository: {json:#}"
+    );
+    assert_eq!(
+        loose_paths(&json),
+        [root.join("stray").display().to_string()]
+    );
+}
+
+#[test]
+fn unknown_reasons_are_one_line() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let repo = root.join("broken");
+    fs::create_dir_all(&repo).unwrap();
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .args(args)
+            .current_dir(&repo)
+            .output()
+            .expect("spawn git");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    git(&["init", "-q", "-b", "main"]);
+    // A repository whose recorded worktree is gone: `gix` opens it but fails
+    // while walking the worktree. That failure used to be dumped into the
+    // `reason` attribute as a multi-line `Caused by:` chain.
+    git(&["config", "core.worktree", "/nonexistent/backupcrawl"]);
+
+    let json = run_json(root, &[]);
+
+    let entry = json["plugins"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|plugin| plugin["plugin"] == "git")
+        .flat_map(|plugin| plugin["entries"].as_array().unwrap())
+        .find(|entry| entry["path"].as_str().unwrap().ends_with("/broken"))
+        .expect("a broken but real repository is still claimed");
+    assert_eq!(entry["status"], "unknown", "{json:#}");
+    let reason = entry["attrs"]["reason"].as_str().expect("reason attr");
+    assert!(
+        !reason.contains('\n'),
+        "reason must be one line: {reason:?}"
+    );
+    assert!(
+        reason.starts_with("failed to iterate status: "),
+        "got: {reason:?}"
+    );
+}
+
+#[test]
 fn console_output_has_panels_without_ansi_when_piped() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

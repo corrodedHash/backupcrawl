@@ -89,8 +89,9 @@ with `--all`), the "Not backed up" and "Permission denied" panels, and a
 links whose target is in a clean-managed tree show up as clean with `--all`).
 JSON output is versioned (`"schema": 1`) and carries the same data in the
 `not_backed_up`, `permission_denied`, `symlinks` (`path`, `target`, `dangling`,
-optional `via`) and `plugins` arrays. A final `plugins: git ok, ...` line
-summarizes each detector's fate.
+optional `via`) and `plugins` arrays. An `unknown` entry carries a one-line
+`reason` attribute (the full error chain is only logged at `-vv`). A final
+`plugins: git ok, ...` line summarizes each detector's fate.
 
 ## Plugins
 

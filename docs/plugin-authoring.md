@@ -121,6 +121,11 @@ Notes:
 - `Claim` has builders: `Claim::clean()`, `Claim::dirty()`, `Claim::ahead()`,
   `Claim::unknown()`, `Claim::ignored()`, plus `.attr(key, value)` and `.prune()`.
   Attributes are free-form and shown in `--all` output / JSON.
+- The `reason` attribute of an `unknown` claim is a **single line**: it is
+  rendered in the report panel and as one JSON string value, so do not paste a
+  full error chain into it. Name what failed (for example
+  `cannot open repository: …`) and log the cause chain at
+  `LogLevel::Debug`, which `-vv` shows.
 - `check_files` has a default implementation that is exactly N `check_file`
   calls. **Do not change the observable behavior** if you override it for speed:
   the `@1` contract requires bulk and singular calls to agree.

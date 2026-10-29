@@ -52,6 +52,7 @@ mod backend;
 mod config;
 mod exec;
 mod model;
+mod reason;
 
 use std::path::{Path, PathBuf};
 
@@ -59,6 +60,7 @@ use backupcrawl_plugin_sdk::{
     Claim, Detector, DetectorError, Host, LogLevel, ScanInfo, bind_detector,
 };
 
+use backend::OpenErrorKind;
 use config::{Backend, GitConfig, IgnoredMode};
 use model::{InspectOptions, RepoInspection, RepoKind};
 
@@ -114,8 +116,11 @@ impl Git {
     /// Opens (or reuses) the repository rooted at `path` with the configured
     /// backend.
     ///
-    /// Returns `None` when the repository should not be claimed (a submodule
-    /// with `recurse-submodules = false`).
+    /// Returns `None` when the repository should not be claimed: a submodule
+    /// with `recurse-submodules = false`, or a path whose `.git` is not a
+    /// usable repository (a stray/incomplete `.git` such as `Missing HEAD`).
+    /// The latter falls through to the walker, which reports it as a loose
+    /// path, instead of producing a bogus `unknown` repository row.
     fn inspect_at(&mut self, path: &Path, host: &mut dyn Host) -> Option<RepoInspection> {
         if let Some(existing) = self
             .repos
@@ -128,16 +133,36 @@ impl Git {
         let options = self.inspect_options();
         let inspection = match self.config.backend {
             Backend::Gix => match backend::open_at(path) {
-                Ok(repo) => backend::inspect(&repo, &options),
-                Err(reason) => model::inspection_error(path, reason),
+                Ok(repo) => backend::inspect(&repo, &options, host),
+                Err(err) => {
+                    self.log_open_error(path, &err, host);
+                    match err.kind() {
+                        OpenErrorKind::NotARepository => return None,
+                        OpenErrorKind::Unreadable => model::inspection_error(path, err.reason()),
+                    }
+                }
             },
-            Backend::Exec => exec::inspect(path, &options, host, self.exec_timeout()),
+            Backend::Exec => exec::inspect(path, &options, host, self.exec_timeout())?,
         };
         if !self.config.recurse_submodules && inspection.kind == RepoKind::Submodule {
             return None;
         }
         self.repos.push(inspection.clone());
         Some(inspection)
+    }
+
+    /// Logs a failed open with the full gix cause chain at debug level (`-vv`).
+    /// The `reason` attribute only keeps one line, so this is where the detail
+    /// stays available.
+    fn log_open_error(&self, path: &Path, err: &backend::OpenError, host: &mut dyn Host) {
+        let verdict = match err.kind() {
+            OpenErrorKind::NotARepository => "declining",
+            OpenErrorKind::Unreadable => "cannot open",
+        };
+        host.log(
+            LogLevel::Debug,
+            &format!("git: {verdict} {}: {}", path.display(), err.chain()),
+        );
     }
 
     /// Discovers the repository enclosing `path` (used for the ambient claim on
@@ -147,10 +172,10 @@ impl Git {
         match self.config.backend {
             Backend::Gix => backend::discover_ancestor(path)
                 .ok()
-                .map(|repo| backend::inspect(&repo, &options)),
+                .map(|repo| backend::inspect(&repo, &options, host)),
             Backend::Exec => exec::discover_ancestor(path, host)
                 .ok()
-                .map(|root| exec::inspect(&root, &options, host, self.exec_timeout())),
+                .and_then(|root| exec::inspect(&root, &options, host, self.exec_timeout())),
         }
     }
 
@@ -291,6 +316,11 @@ fn is_repo_root(path: &Path) -> bool {
     if path.join(".git").symlink_metadata().is_ok() {
         return true;
     }
+    is_bare_layout(path)
+}
+
+/// A bare repository's on-disk layout: `HEAD` + `objects/` + `refs/`.
+pub(crate) fn is_bare_layout(path: &Path) -> bool {
     path.join("HEAD").is_file() && path.join("objects").is_dir() && path.join("refs").is_dir()
 }
 
@@ -390,12 +420,65 @@ mod tests {
         );
     }
 
+    fn attr<'a>(claim: &'a Claim, key: &str) -> Option<&'a str> {
+        claim
+            .attrs
+            .iter()
+            .find(|attr| attr.key == key)
+            .map(|attr| attr.value.as_str())
+    }
+
     #[test]
-    fn unreadable_repository_is_unknown_with_a_reason() {
+    fn stray_git_directory_is_declined() {
         let tmp = tempfile::tempdir().unwrap();
-        // A `.git` directory that is not a repository: detection claims the
-        // path, but opening fails, so the verdict is `unknown` with a reason.
+        // A `.git` directory without `HEAD` is what a half-initialised checkout
+        // or a vendored tool leaves behind. It is not a repository, so the
+        // detector must not claim it: the walker reports the directory as a
+        // loose path instead of a bogus `unknown` repository row.
         std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+
+        let mut detector = Git::default();
+        let mut host = MockHost::new();
+        detector.init(&scan_info(&[]), &mut host).unwrap();
+
+        assert_eq!(detector.check_dir(tmp.path(), &mut host).unwrap(), None);
+        assert!(
+            detector.repos.is_empty(),
+            "a declined path must not be cached: {:?}",
+            detector.repos
+        );
+        // The full gix cause chain stays available at debug level.
+        assert!(
+            host.logs()
+                .iter()
+                .any(|(level, message)| *level == LogLevel::Debug
+                    && message.contains("declining")
+                    && message.contains("HEAD")),
+            "expected a debug log with the cause chain: {:?}",
+            host.logs()
+        );
+    }
+
+    #[test]
+    fn dangling_git_file_is_declined() {
+        let tmp = tempfile::tempdir().unwrap();
+        // A linked worktree / submodule whose `gitdir:` target is gone.
+        std::fs::write(tmp.path().join(".git"), "gitdir: /does/not/exist\n").unwrap();
+
+        let mut detector = Git::default();
+        let mut host = MockHost::new();
+        detector.init(&scan_info(&[]), &mut host).unwrap();
+
+        assert_eq!(detector.check_dir(tmp.path(), &mut host).unwrap(), None);
+        assert!(detector.repos.is_empty());
+    }
+
+    #[test]
+    fn real_repository_is_still_claimed() {
+        let tmp = tempfile::tempdir().unwrap();
+        // An empty repository has an unborn branch: it is a real repository, so
+        // it stays claimed as `unknown` with the one-line `unborn` reason.
+        gix::init(tmp.path()).unwrap();
 
         let mut detector = Git::default();
         let mut host = MockHost::new();
@@ -404,12 +487,43 @@ mod tests {
         let claim = detector
             .check_dir(tmp.path(), &mut host)
             .unwrap()
-            .expect("a broken repository is still claimed");
+            .expect("a real repository is claimed");
         assert_eq!(claim.status, Status::Unknown);
+        assert_eq!(attr(&claim, "head"), Some("unborn"));
+        assert_eq!(attr(&claim, "reason"), Some("unborn"));
+        assert_eq!(detector.repos.len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_repository_stays_unknown() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        gix::init(tmp.path()).unwrap();
+        let git_dir = tmp.path().join(".git");
+        std::fs::set_permissions(&git_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        // Root ignores the mode bits; skip rather than assert a false negative.
+        if std::fs::symlink_metadata(git_dir.join("HEAD")).is_ok() {
+            std::fs::set_permissions(&git_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+
+        let mut detector = Git::default();
+        let mut host = MockHost::new();
+        detector.init(&scan_info(&[]), &mut host).unwrap();
+        let claim = detector.check_dir(tmp.path(), &mut host).unwrap();
+        let _ = std::fs::set_permissions(&git_dir, std::fs::Permissions::from_mode(0o755));
+
+        let claim = claim.expect("an unreadable repository is still claimed");
+        assert_eq!(claim.status, Status::Unknown);
+        let reason = attr(&claim, "reason").expect("unknown carries a reason");
         assert!(
-            claim.attrs.iter().any(|attr| attr.key == "reason"),
-            "unknown must carry a reason: {claim:?}"
+            reason.starts_with("cannot open repository: "),
+            "got: {reason}"
         );
+        assert!(!reason.contains('\n'), "reason must be one line: {reason}");
     }
 
     #[test]

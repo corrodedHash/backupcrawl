@@ -31,7 +31,7 @@ use gix::bstr::BString;
 
 use crate::model::{
     HeadInfo, HeadKind, InspectOptions, RepoInspection, RepoKind, Upstream, finalize,
-    record_head_attrs, record_upstream_attrs, unknown,
+    gitdir_target, record_head_attrs, record_upstream_attrs, unknown,
 };
 
 /// Environment handed to every `git` child.
@@ -83,15 +83,19 @@ pub fn discover_ancestor(path: &Path, host: &mut dyn Host) -> Result<PathBuf, St
 }
 
 /// Inspects the repository rooted at `path`. Never fails: every error is folded
-/// into an `unknown` verdict with a `reason` attribute, as §7.1 requires.
+/// into an `unknown` verdict with a one-line `reason` attribute, as §7.1
+/// requires — except that a path which only *looks* like a repository (a stray
+/// or incomplete `.git`) is declined, so the walker reports it as a loose path
+/// exactly like the `gix` backend does.
 ///
-/// `path` must already look like a repository ([`crate::is_repo_root`]).
+/// Returns `None` when `path` is not a usable repository. `path` must already
+/// look like a repository ([`crate::is_repo_root`]).
 pub fn inspect(
     path: &Path,
     opts: &InspectOptions,
     host: &mut dyn Host,
     timeout_ms: Option<u32>,
-) -> RepoInspection {
+) -> Option<RepoInspection> {
     let bare = path.join(".git").symlink_metadata().is_err();
 
     let (kind, git_dir) = if bare {
@@ -99,7 +103,8 @@ pub fn inspect(
     } else {
         match git_layout(path) {
             Ok(layout) => layout,
-            Err(reason) => {
+            Err(LayoutError::NotARepository) => return None,
+            Err(LayoutError::Failed(reason)) => {
                 let mut inspection = RepoInspection {
                     workdir: Some(path.to_path_buf()),
                     git_dir: path.join(".git"),
@@ -111,7 +116,7 @@ pub fn inspect(
                     ignored: BTreeSet::new(),
                 };
                 inspection.attrs.push(Attr::new("kind", "common"));
-                return unknown(inspection, reason);
+                return Some(unknown(inspection, reason));
             }
         }
     };
@@ -134,29 +139,31 @@ pub fn inspect(
         inspection.attrs.push(Attr::new("bare", "true"));
         match read_bare_head(path, host) {
             Ok(head) => record_head_attrs(&mut inspection.attrs, &head),
-            Err(reason) => return unknown(inspection, reason),
+            Err(reason) => return Some(unknown(inspection, reason)),
         }
-        return inspection;
+        return Some(inspection);
     }
 
     let output = match host.exec(&status_request(path, opts, timeout_ms)) {
         Ok(output) => output,
-        Err(err) => return unknown(inspection, format!("git status failed: {err}")),
+        Err(err) => {
+            return Some(unknown(inspection, format!("git status failed: {err}")));
+        }
     };
     if output.code != 0 {
-        return unknown(
+        return Some(unknown(
             inspection,
             format!(
                 "git status exited with code {}: {}",
                 output.code,
                 stderr_message(&output.stderr)
             ),
-        );
+        ));
     }
 
     let report = match parse(&output.stdout) {
         Ok(report) => report,
-        Err(reason) => return unknown(inspection, reason),
+        Err(reason) => return Some(unknown(inspection, reason)),
     };
     record_head_attrs(&mut inspection.attrs, &report.head);
     if let Some(upstream) = &report.upstream {
@@ -170,7 +177,7 @@ pub fn inspect(
         report.upstream.as_ref(),
         &mut inspection,
     );
-    inspection
+    Some(inspection)
 }
 
 /// Reads HEAD for a bare repository, where `git status` cannot run.
@@ -214,31 +221,36 @@ fn read_bare_head(path: &Path, host: &mut dyn Host) -> Result<HeadInfo, String> 
     })
 }
 
+/// Why a path that looks like a repository cannot be inspected.
+#[derive(Debug, PartialEq, Eq)]
+enum LayoutError {
+    /// Not a usable repository: a stray or incomplete `.git` (no `HEAD`) or a
+    /// dangling `gitdir:` target. The detector declines the claim.
+    NotARepository,
+    /// The layout exists but cannot be read (permissions, I/O). The claim is
+    /// kept and reported `unknown`.
+    Failed(String),
+}
+
 /// The worktree/git-dir layout for a non-bare repository.
 /// `.git` is a directory for a normal repository and a file for a linked
 /// worktree or submodule. The file records `gitdir: <path>`; a git dir under a
 /// `modules/` component identifies a submodule, under `worktrees/` a linked
 /// worktree — the same distinction `gix::repository::Kind` makes.
-fn git_layout(path: &Path) -> Result<(RepoKind, PathBuf), String> {
+fn git_layout(path: &Path) -> Result<(RepoKind, PathBuf), LayoutError> {
     let dotgit = path.join(".git");
-    let meta =
-        std::fs::symlink_metadata(&dotgit).map_err(|err| format!("cannot stat `.git`: {err}"))?;
+    let meta = std::fs::symlink_metadata(&dotgit)
+        .map_err(|err| LayoutError::Failed(format!("cannot stat `.git`: {err}")))?;
     if meta.is_dir() {
+        ensure_head(&dotgit)?;
         return Ok((RepoKind::Common, dotgit));
     }
     let contents = std::fs::read_to_string(&dotgit)
-        .map_err(|err| format!("cannot read `.git` file: {err}"))?;
-    let target = contents
-        .lines()
-        .find_map(|line| line.strip_prefix("gitdir:"))
-        .map(str::trim)
-        .filter(|target| !target.is_empty())
-        .ok_or_else(|| "malformed `.git` file (no `gitdir:`) ".to_owned())?;
-    let git_dir = if Path::new(target).is_absolute() {
-        PathBuf::from(target)
-    } else {
-        path.join(target)
+        .map_err(|err| LayoutError::Failed(format!("cannot read `.git` file: {err}")))?;
+    let Some(git_dir) = gitdir_target(path, &contents) else {
+        return Err(LayoutError::NotARepository);
     };
+    ensure_head(&git_dir)?;
     let kind = if git_dir
         .components()
         .any(|component| component.as_os_str() == "modules")
@@ -248,6 +260,17 @@ fn git_layout(path: &Path) -> Result<(RepoKind, PathBuf), String> {
         RepoKind::LinkedWorkTree
     };
     Ok((kind, git_dir))
+}
+
+/// Rejects a git dir without `HEAD` (a stray `.git`, a dangling `gitdir:`) the
+/// way `gix` reports `Missing HEAD`. A `HEAD` that only lacks permissions is
+/// kept: `git status` reports the failure and the repository stays `unknown`.
+fn ensure_head(git_dir: &Path) -> Result<(), LayoutError> {
+    match std::fs::symlink_metadata(git_dir.join("HEAD")) {
+        Ok(_) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => Ok(()),
+        Err(_) => Err(LayoutError::NotARepository),
+    }
 }
 
 /// Builds the `git status` request for one repository.
@@ -567,15 +590,22 @@ u UU N... 100644 100644 100644 100644 a b c conflict.txt
         let root = tmp.path();
 
         std::fs::create_dir_all(root.join("common/.git")).unwrap();
+        std::fs::write(root.join("common/.git/HEAD"), "ref: refs/heads/main\n").unwrap();
         assert_eq!(
             git_layout(&root.join("common")).unwrap(),
             (RepoKind::Common, root.join("common/.git"))
         );
 
+        std::fs::create_dir_all(root.join("main/.git/worktrees/wt")).unwrap();
+        std::fs::write(
+            root.join("main/.git/worktrees/wt/HEAD"),
+            "ref: refs/heads/main\n",
+        )
+        .unwrap();
         std::fs::create_dir_all(root.join("worktree")).unwrap();
         std::fs::write(
             root.join("worktree/.git"),
-            "gitdir: /main/.git/worktrees/wt\n",
+            "gitdir: ../main/.git/worktrees/wt\n",
         )
         .unwrap();
         assert_eq!(
@@ -583,11 +613,61 @@ u UU N... 100644 100644 100644 100644 a b c conflict.txt
             RepoKind::LinkedWorkTree
         );
 
+        std::fs::create_dir_all(root.join(".git/modules/sub")).unwrap();
+        std::fs::write(root.join(".git/modules/sub/HEAD"), "ref: refs/heads/main\n").unwrap();
         std::fs::create_dir(root.join("sub")).unwrap();
-        std::fs::write(root.join("sub/.git"), "gitdir: ../../.git/modules/sub\n").unwrap();
+        std::fs::write(root.join("sub/.git"), "gitdir: ../.git/modules/sub\n").unwrap();
         assert_eq!(
             git_layout(&root.join("sub")).unwrap().0,
             RepoKind::Submodule
+        );
+    }
+
+    #[test]
+    fn git_layout_declines_a_stray_git_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        // A `.git` without HEAD is not a repository: the detector declines it
+        // instead of spawning `git status` for a guaranteed failure.
+        std::fs::create_dir_all(root.join("stray/.git")).unwrap();
+        assert_eq!(
+            git_layout(&root.join("stray")),
+            Err(LayoutError::NotARepository)
+        );
+
+        // Same for a `.git` file whose `gitdir:` target has no HEAD.
+        std::fs::create_dir_all(root.join("dangling")).unwrap();
+        std::fs::write(root.join("dangling/.git"), "gitdir: ../../nowhere\n").unwrap();
+        assert_eq!(
+            git_layout(&root.join("dangling")),
+            Err(LayoutError::NotARepository)
+        );
+
+        // A git dir that has a `HEAD` is not declined; `git status` decides
+        // whether it is `unknown`.
+        std::fs::create_dir_all(root.join("broken/.git")).unwrap();
+        std::fs::write(root.join("broken/.git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        assert!(git_layout(&root.join("broken")).is_ok());
+    }
+
+    #[test]
+    fn inspect_declines_a_stray_git_directory() {
+        use crate::config::{IgnoredMode, NoUpstream};
+        use backupcrawl_plugin_sdk::MockHost;
+
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let opts = InspectOptions {
+            report_ignored: false,
+            ignored_mode: IgnoredMode::Matching,
+            no_upstream: NoUpstream::Unknown,
+        };
+        let mut host = MockHost::new();
+        assert!(inspect(tmp.path(), &opts, &mut host, None).is_none());
+        assert!(
+            host.exec_requests().is_empty(),
+            "a stray .git must be declined without spawning git"
         );
     }
 

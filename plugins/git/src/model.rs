@@ -14,6 +14,7 @@ use backupcrawl_plugin_sdk::{Attr, Status};
 use gix::bstr::{BStr, BString};
 
 use crate::config::{IgnoredMode, NoUpstream};
+use crate::reason;
 
 /// The kind of repository that was opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,7 +113,7 @@ pub fn inspection_error(path: &Path, reason: impl Into<String>) -> RepoInspectio
         kind: RepoKind::Common,
         bare: false,
         status: Status::Unknown,
-        attrs: vec![Attr::new("reason", reason.into())],
+        attrs: vec![Attr::new("reason", reason::one_line(reason.into()))],
         dirty: BTreeSet::new(),
         ignored: BTreeSet::new(),
     }
@@ -121,7 +122,11 @@ pub fn inspection_error(path: &Path, reason: impl Into<String>) -> RepoInspectio
 /// Folds an inspection error into an `unknown` verdict.
 pub fn unknown(mut inspection: RepoInspection, reason: String) -> RepoInspection {
     inspection.status = Status::Unknown;
-    inspection.attrs.push(Attr::new("reason", reason));
+    // The report contract is one line per `reason`; backends may hand over a
+    // full cause chain (gix multi-line errors), so collapse it here as well.
+    inspection
+        .attrs
+        .push(Attr::new("reason", reason::one_line(reason)));
     inspection
 }
 
@@ -230,6 +235,23 @@ pub fn relative_path(workdir: &Path, path: &Path) -> Option<BString> {
     gix::path::into_bstr(relative)
         .ok()
         .map(|bstr| bstr.into_owned())
+}
+
+/// Resolves the `gitdir:` target recorded in a `.git` file (a linked worktree
+/// or submodule). Relative targets are resolved against the worktree root.
+///
+/// Returns `None` when the file has no non-empty `gitdir:` line.
+pub fn gitdir_target(worktree: &Path, contents: &str) -> Option<PathBuf> {
+    let target = contents
+        .lines()
+        .find_map(|line| line.strip_prefix("gitdir:"))
+        .map(str::trim)
+        .filter(|target| !target.is_empty())?;
+    Some(if Path::new(target).is_absolute() {
+        PathBuf::from(target)
+    } else {
+        worktree.join(target)
+    })
 }
 
 /// Applies the shared verdict/attribute logic to a backend's raw findings.
@@ -352,6 +374,16 @@ mod tests {
             ..ahead_policy
         };
         assert_eq!(decide(&clean_policy, &branch, None, false), Status::Clean);
+    }
+
+    #[test]
+    fn error_reasons_are_collapsed_to_one_line() {
+        let inspection =
+            inspection_error(Path::new("/tmp/x"), "failed: boom\nCaused by:\n 0: nope");
+        assert_eq!(inspection.status, Status::Unknown);
+        assert_eq!(inspection.attrs.len(), 1);
+        assert_eq!(inspection.attrs[0].key, "reason");
+        assert_eq!(inspection.attrs[0].value, "failed: boom");
     }
 
     #[test]
