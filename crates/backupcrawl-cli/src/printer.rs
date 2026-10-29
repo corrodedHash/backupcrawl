@@ -2,7 +2,9 @@
 //!
 //! Console rendering is hand-rolled box drawing on top of the `console` crate
 //! (styling is disabled automatically when stdout is not a terminal or
-//! `NO_COLOR` is set). The JSON shape is versioned via `"schema": 1`.
+//! `NO_COLOR` is set). The JSON shape is versioned via `"schema": 1`; entry
+//! attributes are compacted per status (see [`compact_attrs`]) so clean rows do
+//! not repeat detector defaults.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -163,7 +165,7 @@ pub fn print_json(result: &CrawlResult) -> Result<()> {
                 via: link.via.as_ref().map(|via| via.display().to_string()),
             })
             .collect(),
-        plugins: &result.plugins,
+        plugins: json_plugins(&result.plugins),
     };
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
@@ -412,7 +414,69 @@ struct JsonOutput<'a> {
     permission_denied: Vec<String>,
     /// Unmanaged symlinks, always present (empty when there are none).
     symlinks: Vec<JsonSymlink>,
-    plugins: &'a [PluginReport],
+    plugins: Vec<JsonPlugin<'a>>,
+}
+
+/// Serialized view of one plugin report with compacted entry attributes.
+#[derive(Serialize)]
+struct JsonPlugin<'a> {
+    plugin: &'a str,
+    entries: Vec<JsonEntry<'a>>,
+    errors: u32,
+    notes: &'a [String],
+}
+
+/// Serialized view of one claimed path.
+#[derive(Serialize)]
+struct JsonEntry<'a> {
+    path: &'a PathBuf,
+    status: Status,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    attrs: BTreeMap<String, String>,
+}
+
+/// Builds the serialized plugin view, compacting attrs per entry status.
+fn json_plugins(plugins: &[PluginReport]) -> Vec<JsonPlugin<'_>> {
+    plugins
+        .iter()
+        .map(|report| JsonPlugin {
+            plugin: &report.plugin,
+            entries: report
+                .entries
+                .iter()
+                .map(|entry| JsonEntry {
+                    path: &entry.path,
+                    status: entry.status,
+                    attrs: compact_attrs(entry.status, &entry.attrs),
+                })
+                .collect(),
+            errors: report.errors,
+            notes: &report.notes,
+        })
+        .collect()
+}
+
+/// Drops attributes that restate the status or a plugin default.
+///
+/// The status is the answer to the backup question, so a `clean` entry needs
+/// neither its `branch` nor its `upstream` to explain the verdict. Everything
+/// that diagnoses a `dirty`, `ahead` or `unknown` entry is kept, including a
+/// clean entry's `behind` counter (the upstream is then still needed to make
+/// sense of it). `kind = "common"` and `ahead = 0` are the defaults and are
+/// dropped for every status; non-default kinds (`bare`, `submodule`,
+/// `linked-worktree`) stay.
+fn compact_attrs(status: Status, attrs: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    let keep_upstream = status != Status::Clean || attrs.contains_key("behind");
+    attrs
+        .iter()
+        .filter(|(key, value)| match key.as_str() {
+            "kind" => value.as_str() != "common",
+            "ahead" => value.as_str() != "0",
+            "branch" | "upstream" => keep_upstream,
+            _ => true,
+        })
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
 }
 
 /// One entry of the JSON `symlinks` array.
@@ -480,6 +544,7 @@ fn render_panel(title: &str, lines: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use backupcrawl_core::Entry;
 
     #[test]
     fn panels_have_consistent_width() {
@@ -489,5 +554,147 @@ mod tests {
         );
         let widths: Vec<usize> = panel.lines().map(measure_text_width).collect();
         assert_eq!(widths.iter().min(), widths.iter().max());
+    }
+
+    fn attrs(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+            .collect()
+    }
+
+    fn keys(status: Status, pairs: &[(&str, &str)]) -> Vec<String> {
+        compact_attrs(status, &attrs(pairs)).into_keys().collect()
+    }
+
+    #[test]
+    fn clean_common_entry_keeps_no_default_attrs() {
+        assert_eq!(
+            keys(
+                Status::Clean,
+                &[
+                    ("ahead", "0"),
+                    ("branch", "main"),
+                    ("kind", "common"),
+                    ("upstream", "origin/main"),
+                ]
+            ),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn bare_entry_keeps_bare_and_non_common_kind() {
+        assert_eq!(
+            keys(
+                Status::Clean,
+                &[
+                    ("bare", "true"),
+                    ("branch", "main"),
+                    ("kind", "common"),
+                    ("upstream", "origin/main"),
+                ]
+            ),
+            ["bare"]
+        );
+        assert_eq!(
+            keys(Status::Clean, &[("kind", "submodule"), ("branch", "main")]),
+            ["kind"]
+        );
+    }
+
+    #[test]
+    fn clean_entry_keeps_upstream_when_behind_explains_it() {
+        assert_eq!(
+            keys(
+                Status::Clean,
+                &[
+                    ("ahead", "0"),
+                    ("behind", "2"),
+                    ("branch", "main"),
+                    ("kind", "common"),
+                    ("upstream", "origin/main"),
+                ]
+            ),
+            ["behind", "branch", "upstream"]
+        );
+    }
+
+    #[test]
+    fn dirty_entry_keeps_branch_and_upstream_but_not_defaults() {
+        assert_eq!(
+            keys(
+                Status::Dirty,
+                &[
+                    ("ahead", "0"),
+                    ("branch", "master"),
+                    ("kind", "common"),
+                    ("upstream", "origin/master"),
+                ]
+            ),
+            ["branch", "upstream"]
+        );
+        assert_eq!(
+            keys(Status::Dirty, &[("head", "unborn"), ("kind", "common")]),
+            ["head"]
+        );
+    }
+
+    #[test]
+    fn ahead_entry_keeps_ahead_branch_and_upstream() {
+        assert_eq!(
+            keys(
+                Status::Ahead,
+                &[
+                    ("ahead", "1"),
+                    ("branch", "main"),
+                    ("kind", "common"),
+                    ("upstream", "origin/main"),
+                ]
+            ),
+            ["ahead", "branch", "upstream"]
+        );
+    }
+
+    #[test]
+    fn detached_unknown_entry_keeps_diagnostics() {
+        assert_eq!(
+            keys(
+                Status::Unknown,
+                &[
+                    ("head", "detached"),
+                    ("kind", "common"),
+                    ("reason", "detached-head"),
+                ]
+            ),
+            ["head", "reason"]
+        );
+    }
+
+    #[test]
+    fn json_view_omits_empty_attrs_and_compacts_clean_entries() {
+        let report = PluginReport {
+            plugin: "git".to_owned(),
+            entries: vec![Entry {
+                path: PathBuf::from("repo"),
+                status: Status::Clean,
+                attrs: attrs(&[
+                    ("ahead", "0"),
+                    ("branch", "main"),
+                    ("kind", "common"),
+                    ("upstream", "origin/main"),
+                ]),
+            }],
+            errors: 0,
+            notes: Vec::new(),
+        };
+
+        let json = serde_json::to_value(json_plugins(std::slice::from_ref(&report))).unwrap();
+        assert_eq!(
+            json[0]["entries"][0],
+            serde_json::json!({"path": "repo", "status": "clean"})
+        );
+        assert_eq!(json[0]["errors"], 0);
+        assert_eq!(json[0]["notes"], serde_json::json!([]));
     }
 }

@@ -89,7 +89,14 @@ with `--all`), the "Not backed up" and "Permission denied" panels, and a
 links whose target is in a clean-managed tree show up as clean with `--all`).
 JSON output is versioned (`"schema": 1`) and carries the same data in the
 `not_backed_up`, `permission_denied`, `symlinks` (`path`, `target`, `dangling`,
-optional `via`) and `plugins` arrays. A final `plugins: git ok, ...` line
+optional `via`) and `plugins` arrays. Entry `attrs` are compacted to what the
+status does not already say: `kind=common` and `ahead=0` are defaults and are
+omitted, and a `clean` entry omits `branch`/`upstream` because the status
+answers the backup question. `dirty`, `ahead` and `unknown` entries keep those
+attrs for diagnosis, non-default kinds (`bare`, `submodule`,
+`linked-worktree`) and diagnostic attrs (`reason`, `head`, `behind`, ...) are
+always kept, and a clean entry with `behind` keeps `branch`/`upstream` so the
+counter has context. A final `plugins: git ok, ...` line
 summarizes each detector's fate.
 
 ## Plugins
